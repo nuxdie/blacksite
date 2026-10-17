@@ -94,7 +94,7 @@ func _ready() -> void:
 	menu = Menu.new()
 	menu.game = self
 	add_child(menu)
-	player.spawn(facility.player_start)
+	player.spawn(facility.player_start, facility.player_start_yaw)
 	player.active = false
 	facility.nav_ready.connect(_on_nav_ready)
 	facility.bake_navigation.call_deferred()
@@ -177,7 +177,7 @@ func start_mission() -> void:
 	_repairs.clear()
 	hq.reset()
 	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
-	player.spawn(facility.player_start)
+	player.spawn(facility.player_start, facility.player_start_yaw)
 	player.active = true
 	_beacon.visible = false
 	hud.reset()
@@ -375,7 +375,7 @@ func objective_target() -> Vector3:
 
 func objective_text() -> String:
 	if mission != "infil":
-		return "EXTRACT — LOADING YARD"
+		return "EXTRACT — WEST BREACH"
 	for dv in facility.devices:
 		if dv.kind == Device.Kind.LAPTOP:
 			if dv.copy_state == "copying":

@@ -20,11 +20,13 @@ const DEFS := {
 	"c_blue": {"color": Color("24486e"), "pattern": 2, "rough": 0.7, "metal": 0.35, "grime": 0.45},
 	"c_green": {"color": Color("2f5a36"), "pattern": 2, "rough": 0.7, "metal": 0.35, "grime": 0.45},
 	"c_rust": {"color": Color("8a5426"), "pattern": 2, "rough": 0.75, "metal": 0.3, "grime": 0.5},
+	"glass": {"color": Color("101418"), "pattern": 0, "rough": 0.08, "metal": 0.6, "grime": 0.1},
+	"dirt": {"color": Color("3a352c"), "pattern": 5, "rough": 1.0, "grime": 0.5},
 	"paint": {"color": Color("c8a640"), "pattern": 0, "rough": 0.9, "grime": 0.2},
 }
 
 const PEN := {
-	"plaster": 1.0, "wood": 0.75, "corrugated": 0.6, "roof": 0.6, "metal": 1.6,
+	"plaster": 1.0, "wood": 0.75, "glass": 0.1, "corrugated": 0.6, "roof": 0.6, "metal": 1.6,
 	"c_red": 0.2, "c_blue": 0.2, "c_green": 0.2, "c_rust": 0.2,
 }
 

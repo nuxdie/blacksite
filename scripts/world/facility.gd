@@ -11,9 +11,11 @@ var nav_region: NavigationRegion3D
 var lamps: Array[Lamp] = []
 var pickups: Array[Pickup] = []
 var devices: Array[Device] = []
-var extraction := Vector3(-44, 0, -31)
+## Insertion and extraction: outside the west wall, through a breach in it.
+var extraction := Vector3(-53.6, 0, -29.3)
 var intel_pos := Vector3(46, 5.0, 28.2)
-var player_start := Vector3(-44, 0, -32)
+var player_start := Vector3(-54.2, 0, -26.5)
+var player_start_yaw := -0.92
 var _moon_dir := MOON_DIR.normalized()
 
 
@@ -234,10 +236,13 @@ func _layout() -> void:
 	box(-56, -1, -42, 56, 0, 42, "asphalt")
 	wall("x", 36.5, -51, 51, 1, 4.5, [], "block")
 	wall("x", -36.5, -51, 51, 1, 4.5, [], "block")
-	wall("z", -50.5, -36, 36, 1, 4.5, [], "block")
+	wall("z", -50.5, -36, 36, 1, 4.5, [{"a": -30.3, "b": -28.3, "y0": 0.0, "y1": 4.5}], "block")
 	wall("z", 50.5, -36, 36, 1, 4.5, [], "block")
-	for b: Array in [[-51, 36, 51, 37], [-51, -37, 51, -36], [-51, -36, -50, 36], [50, -36, 51, 36]]:
+	for b: Array in [[-51, 36, 51, 37], [-51, -37, 51, -36], [-51, -36, -50, -30.3], [-51, -28.3, -50, 36], [50, -36, 51, 36]]:
 		blocker(b[0], 4.5, b[1], b[2], 40, b[3])
+	blocker(-51, 2.2, -30.3, -50, 40, -28.3)
+	_outside()
+	_razor_wire()
 	wall("x", -20, -50, -14, 0.6, 2.4, [{"a": -48.0, "b": -44.5, "y0": 0.0, "y1": 2.4}], "block")
 	wall("x", -20, -8, 10, 0.6, 2.4, [], "block")
 
@@ -368,6 +373,9 @@ func _layout() -> void:
 		mi.position = Vector3(c[0], 9.5, c[1])
 		add_child(mi)
 
+	_vehicles()
+	_furnish()
+
 	add_pickup(Pickup.Kind.MEDKIT, Vector3(-6, 0.78, 15.5))
 	add_pickup(Pickup.Kind.MEDKIT, Vector3(35.5, 0.9, 15.5))
 	add_pickup(Pickup.Kind.MEDKIT, Vector3(-26.6, 0, -29))
@@ -397,6 +405,177 @@ func _layout() -> void:
 	_device(Device.make(Device.Kind.LAPTOP, "LAPTOP", intel_pos))
 	for l in lamps:
 		l.zone = zone_of(l.position)
+
+
+# ------------------------------------------------------------------ details
+
+## The strip outside the west wall: dark scrub, the insertion vehicle, the breach.
+func _outside() -> void:
+	box(-56, 0.0, -42, -51, 0.015, 42, "dirt", false)
+	blocker(-56.5, 0, -42, -55.8, 40, 42)
+	blocker(-56, 0, -42.5, -51, 40, -41.8)
+	blocker(-56, 0, 41.8, -51, 40, 42.5)
+	for r: Array in [[-50.9, -30.9, 0.5, 0.35], [-50.2, -27.9, 0.4, 0.3], [-51.6, -28.7, 0.3, 0.25], [-49.6, -30.6, 0.35, 0.2], [-51.3, -31.5, 0.25, 0.2]]:
+		box(r[0] - r[2], 0, r[1] - r[2], r[0] + r[2], r[3], r[1] + r[2], "block", false)
+	sedan(Vector2(-53.8, -21.0), false, "c_green")
+	for z: float in [-38.0, -12.0, 3.0, 19.0, 33.0]:
+		box(-55.2, 0, z, -54.0, 0.9, z + 1.6, "dirt", false)
+
+
+## Concertina wire along the top of the perimeter wall, as one multimesh of coils.
+func _razor_wire() -> void:
+	var runs := [[Vector3(-50.5, 4.75, -36), Vector3(-50.5, 4.75, -30.6)], [Vector3(-50.5, 4.75, -28.0), Vector3(-50.5, 4.75, 36)],
+		[Vector3(50.5, 4.75, -36), Vector3(50.5, 4.75, 36)], [Vector3(-51, 4.75, 36.5), Vector3(51, 4.75, 36.5)], [Vector3(-51, 4.75, -36.5), Vector3(51, 4.75, -36.5)]]
+	var xf: Array[Transform3D] = []
+	for run: Array in runs:
+		var a: Vector3 = run[0]
+		var b: Vector3 = run[1]
+		var d := (b - a).normalized()
+		var n := int(a.distance_to(b) / 0.32)
+		var basis := Basis(Vector3.UP.cross(d).normalized(), d, Vector3.UP.cross(d).normalized().cross(d))
+		for i in n:
+			xf.append(Transform3D(basis.rotated(d, randf_range(-0.1, 0.1)), a.lerp(b, float(i) / n)))
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.2
+	tm.outer_radius = 0.215
+	tm.rings = 12
+	tm.ring_segments = 3
+	var wire := StandardMaterial3D.new()
+	wire.albedo_color = Color("6a6e72")
+	wire.metallic = 0.8
+	wire.roughness = 0.4
+	wire.cull_mode = BaseMaterial3D.CULL_DISABLED
+	tm.material = wire
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = tm
+	mm.instance_count = xf.size()
+	for i in xf.size():
+		mm.set_instance_transform(i, xf[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	add_child(mmi)
+
+
+## Box in a vehicle's frame: `a` runs along its length from the centre, `w` is the half width.
+func _vbox(c: Vector2, along_x: bool, a0: float, a1: float, w: float, y0: float, y1: float, mat: String, collide := true) -> void:
+	if along_x:
+		box(c.x + a0, y0, c.y - w, c.x + a1, y1, c.y + w, mat, collide)
+	else:
+		box(c.x - w, y0, c.y + a0, c.x + w, y1, c.y + a1, mat, collide)
+
+
+func _wheels(c: Vector2, along_x: bool, at: Array, w: float, r: float) -> void:
+	var tire := Mats.plain(Color("151515"), 0.95)
+	for a: float in at:
+		for side: float in [-1.0, 1.0]:
+			var mi := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = r
+			cm.bottom_radius = r
+			cm.height = 0.28
+			mi.mesh = cm
+			mi.material_override = tire
+			if along_x:
+				mi.position = Vector3(c.x + a, r, c.y + side * w)
+				mi.rotation = Vector3(PI / 2, 0, 0)
+			else:
+				mi.position = Vector3(c.x + side * w, r, c.y + a)
+				mi.rotation = Vector3(0, 0, PI / 2)
+			add_child(mi)
+
+
+## Steel bodies stop rifle rounds, so vehicles are real cover. Front faces +along.
+func truck(c: Vector2, along_x: bool, cab: String) -> void:
+	_vbox(c, along_x, -3.7, 3.7, 1.1, 0.5, 0.95, "steel")
+	_vbox(c, along_x, -3.7, 1.3, 1.25, 0.95, 3.4, "metal")
+	_vbox(c, along_x, 1.45, 3.7, 1.2, 0.95, 2.75, cab)
+	_vbox(c, along_x, 3.68, 3.74, 1.0, 1.85, 2.55, "glass", false)
+	_vbox(c, along_x, -3.76, -3.7, 1.2, 1.0, 3.3, "steel", false)
+	_wheels(c, along_x, [-2.6, -1.5, 2.7], 1.1, 0.5)
+
+
+func sedan(c: Vector2, along_x: bool, paint: String) -> void:
+	_vbox(c, along_x, -2.3, 2.3, 0.9, 0.32, 1.0, paint)
+	_vbox(c, along_x, -1.15, 0.95, 0.82, 1.0, 1.42, "glass")
+	_wheels(c, along_x, [-1.45, 1.45], 0.82, 0.33)
+
+
+func forklift(c: Vector2, along_x: bool) -> void:
+	_vbox(c, along_x, -1.1, 0.75, 0.6, 0.15, 1.25, "rack")
+	_vbox(c, along_x, 0.8, 0.92, 0.45, 0.0, 2.9, "steel")
+	_vbox(c, along_x, 0.92, 2.0, 0.42, 0.08, 0.14, "steel", false)
+	_vbox(c, along_x, -0.9, 0.7, 0.58, 2.1, 2.16, "steel", false)
+	for a: float in [-0.85, 0.65]:
+		for sw: float in [-0.52, 0.52]:
+			if along_x:
+				box(c.x + a - 0.03, 1.25, c.y + sw - 0.03, c.x + a + 0.03, 2.1, c.y + sw + 0.03, "steel", false)
+			else:
+				box(c.x + sw - 0.03, 1.25, c.y + a - 0.03, c.x + sw + 0.03, 2.1, c.y + a + 0.03, "steel", false)
+	_wheels(c, along_x, [-0.75, 0.55], 0.58, 0.28)
+
+
+func _vehicles() -> void:
+	truck(Vector2(-6.0, -31.2), true, "c_blue")
+	sedan(Vector2(-38.0, 15.5), false, "steel")
+	sedan(Vector2(-38.0, 21.5), false, "c_red")
+	sedan(Vector2(-11.0, -26.5), true, "metal")
+	forklift(Vector2(22.0, -1.5), false)
+	for p: Array in [[30.0, 18.0], [31.4, 18.0], [30.7, 19.3]]:
+		box(p[0] - 0.6, 0, p[1] - 0.5, p[0] + 0.6, 0.14, p[1] + 0.5, "wood")
+		box(p[0] - 0.55, 0.14, p[1] - 0.45, p[0] + 0.55, 1.1, p[1] + 0.45, "corrugated" if int(p[0]) % 2 == 0 else "wood")
+
+
+## Desks get chairs and screens, the booth gets its monitor bank, walls get cabinets.
+func _furnish() -> void:
+	var screen := Mats.emissive(Color("9fc4ff"), 0.9)
+	var dark := Mats.plain(Color("18191b"), 0.5, 0.2)
+	var chair := Mats.plain(Color("232427"), 0.8)
+	for t: Array in [[-26, 16], [-20, 17.5], [-6, 15.5], [-25, 28], [-15, 29], [-5, 27]]:
+		var x: float = t[0]
+		var z: float = t[1]
+		box(x - 0.25, 0.78, z - 0.3, x + 0.25, 1.1, z - 0.27, "metal", false)
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.46, 0.27, 0.005)
+		mi.mesh = bm
+		mi.material_override = screen
+		mi.position = Vector3(x, 0.955, z - 0.265)
+		add_child(mi)
+		var cm := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = Vector3(0.5, 0.08, 0.5)
+		cm.mesh = cb
+		cm.material_override = chair
+		cm.position = Vector3(x + 0.1, 0.48, z + 0.75)
+		cm.rotation.y = randf_range(-0.5, 0.5)
+		add_child(cm)
+		var back := MeshInstance3D.new()
+		var bb := BoxMesh.new()
+		bb.size = Vector3(0.48, 0.55, 0.06)
+		back.mesh = bb
+		back.material_override = chair
+		back.position = Vector3(0, 0.3, 0.24)
+		cm.add_child(back)
+	# filing cabinets
+	for c: Array in [[-29.5, 24.0], [-29.5, 25.0], [-0.5, 30.5], [-12.45, 13.0]]:
+		box(c[0] - 0.3, 0, c[1] - 0.4, c[0] + 0.3, 1.35, c[1] + 0.4, "metal")
+	# guard booth monitor bank, looking at the gate
+	for i in 2:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.42, 0.3, 0.05)
+		mi.mesh = bm
+		mi.material_override = dark
+		mi.position = Vector3(-13.4 + i * 0.45, 1.0, -18.8)
+		add_child(mi)
+		var sc := MeshInstance3D.new()
+		var sm := BoxMesh.new()
+		sm.size = Vector3(0.38, 0.26, 0.005)
+		sc.mesh = sm
+		sc.material_override = screen
+		sc.position = Vector3(0, 0, 0.03)
+		mi.add_child(sc)
 
 
 func zone_of(p: Vector3) -> String:

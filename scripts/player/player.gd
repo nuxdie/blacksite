@@ -93,10 +93,10 @@ func _ready() -> void:
 	_build_arc()
 
 
-func spawn(pos: Vector3) -> void:
+func spawn(pos: Vector3, facing := PI) -> void:
 	global_position = pos
 	velocity = Vector3.ZERO
-	yaw = PI
+	yaw = facing
 	pitch = 0.0
 	hp = MAX_HP
 	alive = true

@@ -520,7 +520,10 @@ func _shots(dir: String) -> void:
 	await _fresh("carbine")
 	game.god_mode = true
 	var views := [
-		["start", Vector3(-44, 0, -32), PI, 0.0],
+		["start", Vector3(-54.2, 0, -26.5), -0.92, 0.0],
+		["breach", Vector3(-47, 0, -29.3), PI / 2, 0.0],
+		["loading", Vector3(-20, 0, -26), -PI / 2, 0.0],
+		["office", Vector3(-22, 0, 18.5), -PI / 2 - 0.4, -0.1],
 		["gate", Vector3(-11, 0, -24), PI, 0.02],
 		["corridor", Vector3(-28, 0, 21.2), -PI / 2, 0.0],
 		["warehouse", Vector3(12, 0, -10), PI + 0.3, 0.0],
