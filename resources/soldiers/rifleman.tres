@@ -23,7 +23,6 @@ armor = 1.0
 preferred_range = 15.0
 grenades = 1
 weapon_kind = "rifle"
-visor_color = Color(1, 0.227, 0.102, 1)
 uniform_color = Color(0.235, 0.267, 0.212, 1)
 doctrine = "hold"
 weapon_id = "ar7"

@@ -32,3 +32,7 @@ extends Resource
 @export var caliber := "5.56"
 ## Projectiles per shot (shotguns).
 @export var pellets := 1
+## Closed-bolt guns keep a round in the chamber through a tactical reload (30 + 1).
+@export var closed_bolt := true
+## Loaded one shell at a time from loose rounds instead of by magazine.
+@export var tube_fed := false

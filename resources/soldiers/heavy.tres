@@ -23,7 +23,6 @@ armor = 0.6
 preferred_range = 14.0
 grenades = 0
 weapon_kind = "lmg"
-visor_color = Color(1, 0.627, 0.125, 1)
 uniform_color = Color(0.165, 0.173, 0.188, 1)
 doctrine = "advance"
 weapon_id = "lmg"

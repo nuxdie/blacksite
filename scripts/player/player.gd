@@ -455,7 +455,7 @@ func fire_weapon(w: WeaponData) -> void:
 	recov += k
 	yaw += randf_range(-1.0, 1.0) * w.kick_yaw
 	since_shot = 0.0
-	viewmodel.fire_kick(2.5 if w.id == "dmr" else 1.0, w.suppressed)
+	viewmodel.fire_kick(2.5 if w.id == "dmr" else (1.8 if w.pellets > 1 else 1.0), w.suppressed, w)
 	kick += 0.012 if w.id == "dmr" else 0.004
 	if not w.suppressed:
 		game.fx.flash_light(o + view_dir() * 0.8, Color("ffb060"), 3.0, 0.05, 9.0)
@@ -554,6 +554,7 @@ func _update_arc() -> void:
 func start_drag(s: Soldier) -> void:
 	drag_body = s
 	weapons.reload_t = 0.0
+	weapons.tube_loading = false
 	Sfx.play("cloth")
 	game.hud.learn("drag")
 

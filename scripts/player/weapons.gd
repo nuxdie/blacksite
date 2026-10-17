@@ -4,6 +4,8 @@ extends Node
 ## throwable equipment.
 
 const SWITCH_TIME := 0.45
+const SHELL_TIME := 0.55
+const PUMP_TIME := 0.42
 
 var slots: Array[WeaponData] = []
 var cur := 0
@@ -16,6 +18,12 @@ var pending := -1
 var reload_t := 0.0
 var reload_dur := 1.0
 var reload_stage := 0
+## Shotgun: loading shells one by one; firing interrupts it.
+var tube_loading := false
+var _tube_was_empty := false
+var _pump_ejects := false
+## Shotgun: working the pump after a shot.
+var pump_t := 0.0
 var trigger_held := false
 var gadgets: Array[Dictionary] = []
 var gsel := 0
@@ -44,6 +52,8 @@ func equip(primary: String, gadget_types: Array[String]) -> void:
 	switch_t = 0.0
 	pending = -1
 	reload_t = 0.0
+	tube_loading = false
+	pump_t = 0.0
 	gsel = 0
 	aiming_throw = false
 	throw_t = 0.0
@@ -68,6 +78,7 @@ func switch_to(i: int) -> void:
 	pending = i
 	switch_t = SWITCH_TIME
 	reload_t = 0.0
+	tube_loading = false
 	Sfx.play("cloth")
 
 
@@ -79,16 +90,52 @@ func cycle_mode() -> void:
 		player.game.hud.learn("fire_mode")
 
 
+## Rounds sitting in the magazine itself, not counting one in the chamber.
+func in_magazine(slot := -1) -> int:
+	var i := cur if slot < 0 else slot
+	var w := slots[i]
+	if w.closed_bolt and not w.tube_fed:
+		return maxi(0, mag[i] - 1)
+	return mag[i]
+
+
+func capacity(slot := -1) -> int:
+	var w := slots[cur if slot < 0 else slot]
+	return w.mag_size + (1 if w.closed_bolt and not w.tube_fed else 0)
+
+
+func loose_shells() -> int:
+	var n := 0
+	for m in spare[cur]:
+		n += int(m)
+	return n
+
+
 ## Swap in the fullest spare magazine; the partial one goes back in the pouch.
 func start_reload() -> void:
 	var w := current()
 	var sp: Array = spare[cur]
-	if reload_t > 0.0 or switch_t > 0.0 or aiming_throw or player.drag_body or mag[cur] >= w.mag_size:
+	if reload_t > 0.0 or switch_t > 0.0 or aiming_throw or player.drag_body or pump_t > 0.0:
+		return
+	if w.tube_fed:
+		if mag[cur] >= w.mag_size:
+			return
+		if loose_shells() <= 0:
+			player.game.hud.toast("NO SHELLS LEFT")
+			return
+		tube_loading = true
+		_tube_was_empty = mag[cur] == 0
+		reload_dur = SHELL_TIME
+		reload_t = SHELL_TIME
+		reload_stage = 0
+		Sfx.play("cloth")
+		return
+	if mag[cur] >= capacity():
 		return
 	if sp.is_empty():
 		player.game.hud.toast("NO MAGAZINES LEFT")
 		return
-	if int(sp.max()) <= mag[cur]:
+	if int(sp.max()) <= in_magazine():
 		player.game.hud.toast("NO FULLER MAGAZINE")
 		return
 	reload_dur = w.reload_empty_time if mag[cur] == 0 else w.reload_time
@@ -105,11 +152,39 @@ func _finish_reload() -> void:
 			bi = k
 	var next: int = sp[bi]
 	sp.remove_at(bi)
-	if mag[cur] > 0:
-		sp.append(mag[cur])
-	mag[cur] = next
+	var chambered := 1 if current().closed_bolt and mag[cur] > 0 else 0
+	if in_magazine() > 0:
+		sp.append(in_magazine())
+	mag[cur] = next + chambered
 	sp.sort()
 	sp.reverse()
+
+
+## One shell goes into the tube; keep going until it's full, out of shells, or the trigger is pulled.
+func _finish_shell() -> void:
+	var sp: Array = spare[cur]
+	for k in range(sp.size() - 1, -1, -1):
+		if int(sp[k]) > 0:
+			sp[k] = int(sp[k]) - 1
+			if int(sp[k]) == 0:
+				sp.remove_at(k)
+			mag[cur] += 1
+			break
+	if mag[cur] < current().mag_size and loose_shells() > 0:
+		reload_t = SHELL_TIME
+		reload_stage = 0
+		return
+	_end_tube()
+
+
+func _end_tube() -> void:
+	tube_loading = false
+	reload_t = 0.0
+	if _tube_was_empty and mag[cur] > 0:
+		_tube_was_empty = false
+		_pump_ejects = false
+		pump_t = PUMP_TIME
+		Sfx.play("bolt")
 
 
 func add_mag(slot: int, rounds: int) -> bool:
@@ -238,7 +313,22 @@ func tick(dt: float, firing: bool) -> void:
 			cur = pending
 			pending = -1
 			player.viewmodel.show_weapon(current().id)
-	if reload_t > 0.0:
+	if pump_t > 0.0:
+		var before := pump_t
+		pump_t = maxf(0.0, pump_t - dt)
+		if before > PUMP_TIME * 0.5 and pump_t <= PUMP_TIME * 0.5 and _pump_ejects:
+			player.viewmodel.eject_shell()
+	if tube_loading and reload_t > 0.0:
+		if firing and mag[cur] > 0:
+			_end_tube()
+		else:
+			reload_t -= dt
+			if reload_stage == 0 and reload_t < SHELL_TIME * 0.3:
+				reload_stage = 1
+				Sfx.play("mag_in", -4.0)
+			if reload_t <= 0.0:
+				_finish_shell()
+	elif reload_t > 0.0:
 		reload_t -= dt
 		var k := 1.0 - reload_t / reload_dur
 		if reload_stage == 0 and k > 0.55:
@@ -256,7 +346,7 @@ func tick(dt: float, firing: bool) -> void:
 		_burst_len = 0
 		trigger_held = false
 		return
-	if cd > 0.0 or switch_t > 0.0 or reload_t > 0.0 or not player.can_fire():
+	if cd > 0.0 or switch_t > 0.0 or reload_t > 0.0 or pump_t > 0.0 or not player.can_fire():
 		return
 	if fire_mode() == "SEMI" and trigger_held:
 		return
@@ -271,3 +361,7 @@ func tick(dt: float, firing: bool) -> void:
 	cd = 60.0 / w.rpm
 	_burst_len += 1
 	player.fire_weapon(w)
+	if w.tube_fed:
+		pump_t = PUMP_TIME
+		_pump_ejects = true
+		Sfx.play("bolt", -6.0)

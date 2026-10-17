@@ -24,7 +24,6 @@ extends Resource
 @export var grenades := 1
 ## rifle | lmg | shotgun
 @export var weapon_kind := "rifle"
-@export var visor_color := Color("ff3a1a")
 @export var uniform_color := Color("3c4436")
 ## The WeaponData id this guard carries, dropped on death.
 @export var weapon_id := "ar7"

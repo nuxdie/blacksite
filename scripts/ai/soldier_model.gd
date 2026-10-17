@@ -1,6 +1,6 @@
 class_name SoldierModel
 extends Node3D
-## Procedural guard body: two-segment legs, torso, helmet with a glowing visor, and a weapon
+## Procedural guard body: two-segment legs, torso, helmet and goggles, and a weapon
 ## on an aiming pivot. Animated directly from the soldier's state.
 
 var body: Node3D
@@ -42,8 +42,8 @@ func build(profile: SoldierProfile) -> void:
 	var cloth := Mats.plain(profile.uniform_color, 0.9)
 	var vest := Mats.plain(Color("1c1e1c"), 0.75, 0.1)
 	var gear := Mats.plain(Color("111214"), 0.6, 0.4)
-	var skin := Mats.plain(Color("1a1a1a"), 0.8)
-	visor_mat = Mats.emissive(profile.visor_color, 2.2)
+	var skin := Mats.plain(Color("2a2826"), 0.9)
+	visor_mat = Mats.plain(Color("0c0e10"), 0.08, 0.6)
 	body = _pivot(self, Vector3.ZERO)
 	hips = _pivot(body, Vector3(0, 0.95, 0))
 	for sx: float in [-1.0, 1.0]:
@@ -126,7 +126,6 @@ func animate(dt: float, s: Soldier) -> void:
 		head.rotation.y = sin(s.anim * 0.5) * 0.25 if s.state == Soldier.State.CALM else 0.0
 	aim.rotation.z = sin(s.anim * 6.0) * 0.1 if s.reloading > 0.0 else 0.0
 	torso.rotation.z = sin(s.flinch * 30.0) * 0.08 if s.flinch > 0.0 else 0.0
-	visor_mat.emission_energy_multiplier = 2.8 if s.state == Soldier.State.COMBAT else (2.2 if s.state == Soldier.State.SUSPICIOUS else 1.6)
 
 
 ## Falls away from the shot. t runs 0..1.
@@ -142,5 +141,4 @@ func animate_death(dt: float, t: float, side: float) -> void:
 		kn.rotation.x = lerpf(kn.rotation.x, -0.4, dt * 6.0)
 	hips.position.y = lerpf(hips.position.y, 0.55, dt * 5.0)
 	aim.rotation.x = lerpf(aim.rotation.x, -1.4, dt * 5.0)
-	visor_mat.emission_energy_multiplier = lerpf(visor_mat.emission_energy_multiplier, 0.0, dt * 2.0)
 	flashlight.visible = false

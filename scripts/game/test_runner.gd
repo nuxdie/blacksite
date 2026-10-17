@@ -503,6 +503,27 @@ func _shots(dir: String) -> void:
 	await get_tree().create_timer(0.8).timeout
 	_snap(dir + "/tablet.png")
 	game.close_tablet()
+	await _sight_shots(dir)
+
+
+## Hip and aimed views of every weapon against the same backdrop.
+func _sight_shots(dir: String) -> void:
+	for id: String in ["carbine", "smg", "dmr", "pistol", "ar7", "lmg", "shotgun"]:
+		var wd: WeaponData = load("res://resources/weapons/%s.tres" % id)
+		if id == "pistol":
+			game.player.weapons.switch_to(1)
+		else:
+			game.player.weapons.swap_primary(wd, wd.mag_size, [wd.mag_size])
+		game.player.global_position = Vector3(-11, 0, -24)
+		game.player.yaw = PI
+		game.player.pitch = 0.0
+		await get_tree().create_timer(0.7).timeout
+		_snap("%s/hip_%s.png" % [dir, id])
+		Input.action_press("aim")
+		await get_tree().create_timer(0.7).timeout
+		_snap("%s/ads_%s.png" % [dir, id])
+		Input.action_release("aim")
+		await get_tree().create_timer(0.3).timeout
 
 
 func _snap(path: String) -> void:

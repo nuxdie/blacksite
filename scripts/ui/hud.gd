@@ -565,7 +565,7 @@ func _prompts() -> Array:
 		out.append([["sprint"], "Hold breath"])
 	var cur := w.current()
 	var sp: Array = w.spares()
-	if w.reload_t <= 0.0 and w.mag[w.cur] <= cur.mag_size * 0.25 and not sp.is_empty() and int(sp.max()) > w.mag[w.cur]:
+	if w.reload_t <= 0.0 and w.mag[w.cur] <= cur.mag_size * 0.25 and not sp.is_empty() and (cur.tube_fed or int(sp.max()) > w.in_magazine()):
 		out.append([["reload"], "Reload"])
 	if w.cur == 0 and w.mag[0] == 0 and sp.is_empty():
 		out.append([["sidearm"], "Sidearm"])
@@ -601,35 +601,50 @@ func _draw_hint(size: Vector2) -> void:
 		_prompt_row(Vector2(x, y), keys, h.text, a)
 
 
+## Fill everything outside a circle with a colour (the scope housing).
+func _mask_outside(size: Vector2, cc: Vector2, r: float, col: Color) -> void:
+	_overlay.draw_rect(Rect2(0, 0, maxf(0.0, cc.x - r + 1), size.y), col)
+	_overlay.draw_rect(Rect2(cc.x + r - 1, 0, maxf(0.0, size.x - (cc.x + r) + 1), size.y), col)
+	for i in 72:
+		var a0 := TAU * i / 72.0
+		var a1 := TAU * (i + 1) / 72.0
+		var p0 := Vector2(cc.x + cos(a0) * r, cc.y + sin(a0) * r)
+		var p1 := Vector2(cc.x + cos(a1) * r, cc.y + sin(a1) * r)
+		var edge := -1.0 if sin((a0 + a1) * 0.5) < 0.0 else size.y + 1.0
+		_overlay.draw_colored_polygon(PackedVector2Array([p0, p1, Vector2(p1.x, edge), Vector2(p0.x, edge)]), col)
+
+
+## Scope view. The reticle is where the round goes; the dark eye-box shadow drifts with head
+## movement, sway and recoil, the way a real scope punishes a sloppy cheek weld.
 func _draw_scope(size: Vector2, c: Vector2) -> void:
-	var r := size.y * 0.44
-	var black := Color(0, 0, 0, 1)
-	_overlay.draw_rect(Rect2(0, 0, c.x - r + 1, size.y), black)
-	_overlay.draw_rect(Rect2(c.x + r - 1, 0, size.x - (c.x + r) + 1, size.y), black)
-	for i in 64:
-		var a0 := TAU * i / 64.0
-		var a1 := TAU * (i + 1) / 64.0
-		var top := Vector2(c.x + cos(a0) * r, c.y + sin(a0) * r)
-		var top2 := Vector2(c.x + cos(a1) * r, c.y + sin(a1) * r)
-		var edge_y := 0.0 if sin(a0) < 0.0 else size.y
-		_overlay.draw_colored_polygon(PackedVector2Array([top, top2, Vector2(top2.x, edge_y), Vector2(top.x, edge_y)]), black)
-	_overlay.draw_arc(c, r - 10, 0, TAU, 96, Color(0, 0, 0, 0.6), 22.0)
-	var dark := Color(0, 0, 0, 0.92)
-	_overlay.draw_rect(Rect2(c.x - r, c.y - 2, r * 0.72, 4), dark)
-	_overlay.draw_rect(Rect2(c.x + r * 0.28, c.y - 2, r * 0.72, 4), dark)
-	_overlay.draw_rect(Rect2(c.x - 2, c.y + r * 0.28, 4, r * 0.72), dark)
-	_overlay.draw_rect(Rect2(c.x - 2, c.y - r, 4, r * 0.72), dark)
-	_overlay.draw_line(Vector2(c.x - r * 0.28, c.y), Vector2(c.x - 5, c.y), dark, 1.0)
-	_overlay.draw_line(Vector2(c.x + 5, c.y), Vector2(c.x + r * 0.28, c.y), dark, 1.0)
-	_overlay.draw_line(Vector2(c.x, c.y + 5), Vector2(c.x, c.y + r * 0.28), dark, 1.0)
-	_overlay.draw_line(Vector2(c.x, c.y - r * 0.28), Vector2(c.x, c.y - 5), dark, 1.0)
-	for i in range(1, 4):
-		for s: float in [-1.0, 1.0]:
-			_overlay.draw_circle(c + Vector2(s * i * r * 0.08, 0), 2.0, dark)
-			_overlay.draw_circle(c + Vector2(0, s * i * r * 0.08), 2.0, dark)
-	_overlay.draw_circle(c, 1.6, Color(1, 0.16, 0.08, 0.9))
 	var p := game.player
+	var vm := p.viewmodel
+	var r := size.y * 0.45
+	var shift := Vector2(-vm.sway.x, vm.sway.y) * 2600.0
+	shift += Vector2(sin(p.step_phase * PI), absf(cos(p.step_phase * PI))) * p.bob * 14.0
+	shift += Vector2(0, vm.recoil * 900.0)
+	shift = shift.limit_length(r * 0.35)
+	var cc := c + shift
+	var ink := Color(0.02, 0.02, 0.02, 0.95)
+	# fine crosshair with heavy outer posts (duplex)
+	var inner := r * 0.32
+	_overlay.draw_line(Vector2(c.x - inner, c.y), Vector2(c.x + inner, c.y), ink, 1.2)
+	_overlay.draw_line(Vector2(c.x, c.y - inner), Vector2(c.x, c.y + inner), ink, 1.2)
+	for d: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
+		_overlay.draw_line(c + d * inner, c + d * r * 1.4, ink, 5.0)
+	for i in range(1, 4):
+		var o := inner * i / 4.0
+		for d: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.DOWN]:
+			var n := Vector2(-d.y, d.x)
+			_overlay.draw_line(c + d * o - n * 4.0, c + d * o + n * 4.0, ink, 1.2)
+	_overlay.draw_circle(c, 1.8, Color(1.0, 0.14, 0.06, 0.85))
+	# eye-box shadow: soft inner falloff, then the housing
+	for i in 10:
+		var k := i / 10.0
+		_overlay.draw_arc(cc, r - 26.0 + k * 26.0, 0, TAU, 96, Color(0, 0, 0, 0.08 + k * 0.08), 3.2)
+	_overlay.draw_arc(cc, r + 1.0, 0, TAU, 96, Color(0.55, 0.65, 0.8, 0.12), 1.5)
+	_mask_outside(size, cc, r, Color.BLACK)
 	var bw := 180.0
-	var by := size.y * 0.91
-	_overlay.draw_rect(Rect2(c.x - bw / 2, by, bw, 3), Color(1, 1, 1, 0.15))
-	_overlay.draw_rect(Rect2(c.x - bw / 2, by, bw * p.breath / Player.BREATH, 3), Style.RED if p.breath_out > 0.0 else Style.INK)
+	var by := size.y * 0.93
+	_overlay.draw_rect(Rect2(c.x - bw / 2, by, bw, 2), Color(1, 1, 1, 0.12))
+	_overlay.draw_rect(Rect2(c.x - bw / 2, by, bw * p.breath / Player.BREATH, 2), Style.RED if p.breath_out > 0.0 else Style.DIM)

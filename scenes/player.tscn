@@ -21,7 +21,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.62, 0)
 [node name="Camera" type="Camera3D" parent="Head"]
 current = true
 fov = 74.0
-near = 0.03
+near = 0.01
 far = 400.0
 
 [node name="ViewModel" type="Node3D" parent="Head/Camera"]
