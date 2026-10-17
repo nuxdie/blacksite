@@ -55,6 +55,8 @@ var breath := BREATH
 var breath_out := 0.0
 var holding_breath := false
 var drag_body: Soldier = null
+## Set by the game while a hack is being held.
+var hacking := false
 var drag_snd := 0.0
 var vault_t := -1.0
 var vault_from := Vector3.ZERO
@@ -144,7 +146,7 @@ func speed_2d() -> float:
 
 
 func can_fire() -> bool:
-	return alive and active and not sprinting and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
+	return alive and active and not hacking and not sprinting and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
 
 
 func _ray(from: Vector3, to: Vector3) -> Dictionary:
@@ -319,6 +321,8 @@ func _move(dt: float, wish: Vector3, w: WeaponData) -> void:
 		speed = SPRINT
 	if drag_body:
 		speed = minf(speed, DRAG_SPEED)
+	if hacking:
+		speed *= 0.5
 	speed *= lerpf(1.0, 0.4 if w.scoped else 0.6, ads) * (0.6 if absf(lean_k) > 0.3 else 1.0) * (1.0 - supp * 0.25)
 	var target := wish * speed
 	if is_on_floor():

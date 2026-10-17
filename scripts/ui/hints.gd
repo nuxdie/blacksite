@@ -21,6 +21,8 @@ var defs: Array[Dictionary] = [
 	{"id": "aim", "keys": ["aim"], "text": "Aim down sights", "trigger": "enemy_visible"},
 	{"id": "mark", "keys": ["mark"], "text": "Mark a target — tracked through walls", "trigger": "calm_enemy_visible"},
 	{"id": "lights", "keys": [], "text": "You're lit up. Lamps can be shot out", "trigger": "lit_near_guards", "info": true},
+	{"id": "hack", "keys": ["hack"], "text": "Cameras radio in what they see. Aim at one and hold to loop its feed", "trigger": "camera_in_view"},
+	{"id": "relay", "keys": [], "text": "The comms relay on the office roof carries their radio. Jam it and alarms go nowhere", "trigger": "camera_alarm", "info": true},
 	{"id": "lean", "keys": ["lean_left", "lean_right"], "text": "Lean out from cover", "trigger": "combat"},
 	{"id": "sprint", "keys": ["sprint"], "text": "Sprint — guards hear it", "trigger": "late_quiet"},
 	{"id": "gadget", "keys": ["gadget"], "text": "Hold to aim equipment, release to throw", "trigger": "gadget_time"},
@@ -101,6 +103,13 @@ func _condition(trigger: String) -> bool:
 			return p.hp < 60.0
 		"scavenge_seen":
 			return _events.has("kill") and game.player.alive
+		"camera_in_view":
+			for dv in game.facility.devices:
+				if dv.kind == Device.Kind.CAMERA and dv.can_hack() and dv.global_position.distance_to(p.global_position) < 26.0 and (dv.global_position - p.eye_pos()).normalized().dot(p.view_dir()) > 0.8:
+					return true
+			return false
+		"camera_alarm":
+			return _events.has("camera_alarm") and game.jam_t <= 0.0
 		"penetrated":
 			return _events.has("penetrated")
 	return false

@@ -10,6 +10,7 @@ const MOON_DIR := Vector3(-0.45, 0.55, -0.7)
 var nav_region: NavigationRegion3D
 var lamps: Array[Lamp] = []
 var pickups: Array[Pickup] = []
+var devices: Array[Device] = []
 var extraction := Vector3(-44, 0, -31)
 var intel_pos := Vector3(46, 5.0, 28.2)
 var player_start := Vector3(-44, 0, -32)
@@ -374,7 +375,20 @@ func _layout() -> void:
 	add_pickup(Pickup.Kind.AMMO, Vector3(-26, 0.78, 16))
 	add_pickup(Pickup.Kind.AMMO, Vector3(-19, 0, -3.9))
 	add_pickup(Pickup.Kind.AMMO, Vector3(40.5, 4.2, 15))
-	add_pickup(Pickup.Kind.INTEL, intel_pos)
+	box(-13.6, 0, -18.95, -11.4, 0.8, -18.35, "wood")
+	_device(Device.make(Device.Kind.TERMINAL, Vector3(-12.5, 0.8, -18.6), PI))
+	_device(Device.make(Device.Kind.LAPTOP, intel_pos))
+	_device(Device.make(Device.Kind.RELAY, Vector3(-26.5, 3.7, 29.0)))
+	_device(Device.camera(Vector3(9.6, 6.0, -12.0), PI / 2, 0.7))
+	_device(Device.camera(Vector3(-14.0, 3.0, -19.3), 0.3, 0.8))
+	_device(Device.camera(Vector3(47.5, 7.5, 0.0), PI / 2, 0.8, -0.45))
+	_device(Device.camera(Vector3(-0.5, 3.0, 21.2), PI / 2, 0.25, -0.2))
+	_device(Device.camera(Vector3(9.6, 6.0, 28.5), PI * 0.6, 0.6))
+
+
+func _device(d: Device) -> void:
+	add_child(d)
+	devices.append(d)
 
 
 # ------------------------------------------------------------------ navigation
@@ -395,7 +409,23 @@ func bake_navigation() -> void:
 
 
 func reset_props() -> void:
+	for d in devices:
+		d.hack_progress = 0.0
+		d.hacked = false
+		d.offline = false
+		d.looped = 0.0
+		d.aware = 0.0
+		d.alarm = false
+		if d._cone:
+			d._cone.visible = true
+		if d._lens_mat:
+			d._lens_mat.emission_energy_multiplier = 1.5
+		if d.kind == Device.Kind.LAPTOP:
+			d._led_mat.emission = Color("40ff90")
+		elif d.kind == Device.Kind.TERMINAL:
+			d._led_mat.emission = Color("4ad0ff")
 	for l in lamps:
+		l.hack_progress = 0.0
 		l.dead = false
 		l.light.visible = true
 		l.light.light_energy = l.energy

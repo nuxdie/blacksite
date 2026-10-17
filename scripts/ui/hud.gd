@@ -190,6 +190,7 @@ func _draw_overlay() -> void:
 	_draw_markers()
 	if p.alive:
 		_draw_sights(c)
+		_draw_hack(c)
 	_draw_arcs(c)
 	_draw_vitals(size)
 	_draw_ammo(size)
@@ -277,6 +278,30 @@ func _draw_sights(c: Vector2) -> void:
 			_overlay.draw_line(c + d.normalized() * 6.0, c + d.normalized() * 13.0, col2, 3.0 if _hit_kill else 2.0)
 
 
+func _draw_hack(c: Vector2) -> void:
+	var h: Object = game.hack_target
+	if h:
+		var cam := game.player.camera
+		var wp: Vector3 = h.hack_point()
+		if not cam.is_position_behind(wp):
+			var sp := cam.unproject_position(wp)
+			var s := 13.0
+			var col := Color(Style.AMBER, 0.9)
+			for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+				var o := sp + corner * s
+				_overlay.draw_line(o, o - Vector2(corner.x * 6.0, 0), col, 1.5)
+				_overlay.draw_line(o, o - Vector2(0, corner.y * 6.0), col, 1.5)
+		var prog := float(h.hack_progress)
+		if prog > 0.0:
+			_overlay.draw_arc(c, 26.0, 0.0, TAU, 48, Color(1, 1, 1, 0.15), 3.0)
+			_overlay.draw_arc(c, 26.0, -PI / 2.0, -PI / 2.0 + TAU * prog, 48, Style.AMBER, 3.0)
+			var name := "DOWNLOADING" if h is Device and h.kind == Device.Kind.LAPTOP else "HACKING " + str(h.hack_name()).to_upper()
+			_text(c + Vector2(0, 50), "%s  %d%%" % [name, roundi(prog * 100.0)], 13, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+	if game.jam_t > 0.0:
+		var secs := ceili(game.jam_t)
+		_text(Vector2(_overlay.size.x * 0.5, 96), "COMMS JAMMED  %d:%02d" % [secs / 60, secs % 60], 13, Style.GREEN, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+
+
 func _draw_arcs(c: Vector2) -> void:
 	for d: Dictionary in _dmg_dirs:
 		var a := _screen_angle(d.pos)
@@ -298,6 +323,21 @@ func _draw_arcs(c: Vector2) -> void:
 		var a := _screen_angle(s.global_position + Vector3.UP * 1.5)
 		_overlay.draw_arc(c, 100.0, a - 0.16, a + 0.16, 12, Color(col, 0.18), 4.0)
 		_overlay.draw_arc(c, 100.0, a - 0.16 * amt, a + 0.16 * amt, 12, Color(col, 0.95), 4.0)
+	for dv in game.facility.devices:
+		if dv.kind != Device.Kind.CAMERA or dv.offline or dv.looped > 0.0:
+			continue
+		var col2: Color
+		var amt2 := minf(1.0, dv.aware)
+		if dv.alarm and dv.sees_player:
+			col2 = Style.RED
+			amt2 = 1.0
+		elif dv.aware > 0.03:
+			col2 = Style.AMBER
+		else:
+			continue
+		var a2 := _screen_angle(dv.global_position)
+		_overlay.draw_arc(c, 108.0, a2 - 0.12, a2 + 0.12, 10, Color(col2, 0.18), 3.0)
+		_overlay.draw_arc(c, 108.0, a2 - 0.12 * amt2, a2 + 0.12 * amt2, 10, Color(col2, 0.95), 3.0)
 	for g in game.gadgets:
 		if g.type != "frag" or g.global_position.distance_to(game.player.global_position) > 11.0:
 			continue
@@ -373,6 +413,13 @@ func _prompts() -> Array:
 	if p.drag_body:
 		out.append([["interact"], "Release to drop"])
 		return out
+	if game.hacking and game.hack_target:
+		out.append([["interact" if game.hack_target.is_physical() else "hack"], "Keep holding"])
+		return out
+	if game.hack_target:
+		var h: Object = game.hack_target
+		var verb := "Hold to download data" if h is Device and h.kind == Device.Kind.LAPTOP else "Hold to hack " + str(h.hack_name())
+		out.append([["interact" if h.is_physical() else "hack"], verb])
 	var t := game.takedown_target()
 	if t:
 		out.append([["interact"], "Takedown"])

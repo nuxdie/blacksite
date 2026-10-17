@@ -22,7 +22,7 @@ const BINDINGS := {
 	"reload": [["key", KEY_R]], "fire_mode": [["key", KEY_B]],
 	"primary": [["key", KEY_1]], "sidearm": [["key", KEY_2]], "swap": [["mouse", MOUSE_BUTTON_WHEEL_UP], ["mouse", MOUSE_BUTTON_WHEEL_DOWN]],
 	"gadget": [["key", KEY_G]], "gadget_cycle": [["key", KEY_X]],
-	"interact": [["key", KEY_F]], "mark": [["key", KEY_Z], ["mouse", MOUSE_BUTTON_MIDDLE]],
+	"interact": [["key", KEY_F]], "hack": [["key", KEY_H]], "mark": [["key", KEY_Z], ["mouse", MOUSE_BUTTON_MIDDLE]],
 	"pause": [["key", KEY_ESCAPE]],
 }
 

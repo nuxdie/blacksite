@@ -39,7 +39,7 @@ const LINES := {
 	"hit": ["I'm hit!", "Taking fire!"], "supp": ["Suppressing!", "Keep his head down!"], "huh": ["Huh?", "Hold on...", "What was that?"],
 	"calm": ["Must be nothing.", "...Nothing."], "push": ["Pushing!", "Moving in!"], "body": ["Body here!", "Someone's down!"],
 	"blind": ["I can't see!", "Flash — I'm blind!"], "lights": ["Lights just went out...", "Who killed the lights?"],
-	"noise": ["Hear that?", "Something over there..."], "smoke": ["Smoke! Watch the smoke!", "He's in the smoke!"],
+	"noise": ["Hear that?", "Something over there..."], "jammed": ["Radio check — anyone?", "Comms are down!", "I've got nothing but static."], "smoke": ["Smoke! Watch the smoke!", "He's in the smoke!"],
 }
 
 var phase := Phase.LOADING
@@ -64,6 +64,10 @@ var _pending_radio: Array[Dictionary] = []
 var _beacon: Node3D
 var _test: TestRunner
 var _shot_hit := false
+var jam_t := 0.0
+var hack_target: Object = null
+var hacking := false
+var _body_scan_t := 0.0
 
 
 func _ready() -> void:
@@ -154,7 +158,10 @@ func start_mission() -> void:
 	mission = "infil"
 	detected = false
 	reinforce_t = -1.0
-	stats = {"shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
+	jam_t = 0.0
+	hack_target = null
+	hacking = false
+	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
 	player.spawn(facility.player_start)
 	player.active = true
 	_beacon.visible = false
@@ -283,6 +290,7 @@ func _physics_process(dt: float) -> void:
 	_tick_gadgets(sdt)
 	_tick_pickups()
 	_tick_radio()
+	_tick_devices(sdt)
 	_tick_mission(sdt)
 
 
@@ -395,6 +403,8 @@ func say(s: Soldier, kind: String, force := false) -> void:
 
 
 func radio_alert(s: Soldier, delay: float) -> void:
+	if jam_t > 0.0:
+		return
 	_pending_radio.append({"s": s, "t": time + delay})
 
 
@@ -538,13 +548,18 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 func _break_lamp(l: Lamp) -> void:
 	l.shatter()
 	fx.burst("glass", l.global_position, Vector3.DOWN)
+	light_killed(l, true)
+
+
+## Guards near a lamp notice the dark; breaking glass is far more alarming than a dead fixture.
+func light_killed(l: Lamp, loud: bool) -> void:
 	_light_t = 0.0
 	hud.learn("lights")
 	for s in soldiers:
-		if s.alive and s.state != Soldier.State.COMBAT and s.global_position.distance_to(l.global_position) < 16.0:
+		if s.alive and s.state != Soldier.State.COMBAT and s.global_position.distance_to(l.global_position) < (16.0 if loud else 12.0):
 			var below := l.global_position
 			below.y = s.global_position.y
-			s.make_suspicious(below, 0.5, "lights")
+			s.make_suspicious(below, 0.5 if loud else 0.3, "lights")
 
 
 func soldier_shot(s: Soldier, target: Vector3, extra: float, suppressive: bool) -> void:
@@ -709,6 +724,132 @@ func _on_detonate(g: Gadget) -> void:
 
 # ------------------------------------------------------------------ interaction
 
+# ------------------------------------------------------------------ hacking
+
+func hackables() -> Array:
+	var out: Array = []
+	out.append_array(facility.devices)
+	out.append_array(facility.lamps)
+	return out
+
+
+## The device under the crosshair that can be hacked from here, or null.
+func find_hack_target() -> Object:
+	if not player.alive or player.drag_body or player.vault_t >= 0.0:
+		return null
+	var eye := player.eye_pos()
+	var d := player.view_dir()
+	var best: Object = null
+	var best_ang := INF
+	for h: Object in hackables():
+		if not h.can_hack():
+			continue
+		var hp: Vector3 = h.hack_point()
+		var to := hp - eye
+		var dist := to.length()
+		if dist > h.hack_range():
+			continue
+		var ang := to.normalized().angle_to(d)
+		var tol := 0.45 if h.is_physical() else maxf(0.025, 0.45 / dist)
+		if ang > tol or ang > best_ang:
+			continue
+		if not h.is_physical() and not los(eye, hp - to.normalized() * 0.35):
+			continue
+		best = h
+		best_ang = ang
+	return best
+
+
+func _tick_devices(dt: float) -> void:
+	jam_t = maxf(0.0, jam_t - dt)
+	for dv in facility.devices:
+		dv.tick(dt, self)
+	hack_target = find_hack_target()
+	hacking = false
+	if hack_target and player.active:
+		var key := "interact" if hack_target.is_physical() else "hack"
+		if Input.is_action_pressed(key):
+			hacking = true
+			hack_target.hack_progress = minf(1.0, float(hack_target.hack_progress) + dt / float(hack_target.hack_time()))
+			if hack_target.hack_progress >= 1.0:
+				stats.hacks += 1
+				Sfx.play("objective", -8.0, 0.0)
+				hud.learn("hack")
+				hack_target.on_hacked(self)
+				hack_target = null
+				hacking = false
+	player.hacking = hacking
+	# remote hacks you walk away from slowly lose their foothold; physical ones keep their progress
+	for h: Object in hackables():
+		if h != hack_target or not hacking:
+			if not h.is_physical() and float(h.hack_progress) > 0.0:
+				h.hack_progress = maxf(0.0, float(h.hack_progress) - dt * 0.12)
+	# cameras spot bodies too
+	_body_scan_t -= dt
+	if _body_scan_t <= 0.0:
+		_body_scan_t = 1.0
+		for c in soldiers:
+			if c.alive or c.corpse_found or c.death_t < 0.5:
+				continue
+			for dv in facility.devices:
+				if dv.global_position.distance_to(c.global_position) < 22.0 and dv.sees_point(self, c.global_position + Vector3.UP * 0.3):
+					c.corpse_found = true
+					_camera_dispatch(c.global_position, "body")
+					break
+
+
+func jam_comms(seconds: float) -> void:
+	jam_t = seconds
+	_pending_radio = _pending_radio.filter(func(r: Dictionary) -> bool: return r.has("release"))
+	hud.banner("COMMS JAMMED")
+	for s in soldiers:
+		if s.alive and s.state == Soldier.State.COMBAT and randf() < 0.5:
+			say(s, "jammed")
+			break
+
+
+func cameras_offline() -> void:
+	for dv in facility.devices:
+		if dv.kind == Device.Kind.CAMERA:
+			dv.set_offline()
+	hud.banner("CAMERAS OFFLINE")
+
+
+func data_downloaded() -> void:
+	_take_intel()
+
+
+func camera_alarm(cam: Device) -> void:
+	Sfx.play_at("alarm", cam.global_position, 2.0, false)
+	hud.hint_event("camera_alarm")
+	if jam_t > 0.0:
+		hud.toast("CAMERA ALARM BLOCKED  ·  COMMS JAMMED")
+		return
+	hud.subtitle("SECURITY", "Intruder on camera.")
+	_camera_dispatch(player.global_position, "saw")
+
+
+func camera_report(_cam: Device) -> void:
+	if jam_t > 0.0:
+		return
+	for sq: Squad in squads.values():
+		if sq.alive_members().any(func(m: Soldier) -> bool: return m.state == Soldier.State.COMBAT):
+			sq.report(player.global_position, time)
+
+
+## Security calls it in over the radio: the nearest guards respond.
+func _camera_dispatch(pos: Vector3, how: String) -> void:
+	if jam_t > 0.0:
+		return
+	var near := soldiers.filter(func(s: Soldier) -> bool: return s.alive)
+	near.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.global_position.distance_to(pos) < b.global_position.distance_to(pos))
+	for i in mini(3, near.size()):
+		var s: Soldier = near[i]
+		s.squad.report(pos, time)
+		if s.state != Soldier.State.COMBAT:
+			s.alert(pos, how if how == "body" else "radio")
+
+
 func takedown_target() -> Soldier:
 	if not player.alive or player.drag_body:
 		return null
@@ -759,7 +900,7 @@ func interact_target() -> Pickup:
 
 
 func interact() -> void:
-	if not player.alive:
+	if not player.alive or (hack_target and hack_target.is_physical()):
 		return
 	var t := takedown_target()
 	if t:

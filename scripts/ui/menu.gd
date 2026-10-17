@@ -167,6 +167,7 @@ func _stats() -> void:
 		["Loadout", "%s  ·  %s" % [game.player.weapons.slots[0].display_name, "  ·  ".join(Settings.gadgets.map(func(g: String) -> String: return Gadget.INFO[g].name))]],
 		["Hostiles neutralized", str(s.kills)],
 		["Silent takedowns", str(s.takedowns)],
+		["Devices hacked", str(s.get("hacks", 0))],
 		["Accuracy", "%d%%  (%d headshots)" % [acc, s.heads]],
 		["Damage taken", str(roundi(s.damage_taken))],
 		["Detected", "yes" if game.detected else "never"],
@@ -198,7 +199,7 @@ func show_controls() -> void:
 		["move_forward", "Move (WASD)"], ["sprint", "Sprint · hold breath when scoped"], ["crouch", "Crouch"], ["crouch_hold", "Crouch while held"],
 		["jump", "Jump · vault"], ["lean_left", "Lean left"], ["lean_right", "Lean right"], ["aim", "Aim · aim over low cover"],
 		["fire", "Fire"], ["reload", "Reload"], ["fire_mode", "Fire mode"], ["primary", "Primary"], ["sidearm", "Sidearm"],
-		["gadget", "Equipment (hold, release)"], ["gadget_cycle", "Switch equipment"], ["interact", "Interact · takedown · drag"], ["mark", "Mark target"],
+		["hack", "Hack device (hold)"], ["gadget", "Equipment (hold, release)"], ["gadget_cycle", "Switch equipment"], ["interact", "Interact · takedown · drag"], ["mark", "Mark target"],
 	]
 	for r: Array in rows:
 		grid.add_child(Style.label(Settings.glyph(r[0]), 16, Style.INK, Style.semibold))

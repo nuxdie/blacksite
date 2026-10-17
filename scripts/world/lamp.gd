@@ -60,6 +60,51 @@ func contribution(p: Vector3) -> float:
 	return 0.0 if d > r else (1.0 - d / r)
 
 
+# ------------------------------------------------------------------ hackable interface
+
+var hack_progress := 0.0
+
+
+func hack_name() -> String:
+	return "light"
+
+
+func hack_time() -> float:
+	return 1.2
+
+
+func hack_range() -> float:
+	return 26.0
+
+
+func is_physical() -> bool:
+	return false
+
+
+func can_hack() -> bool:
+	return not dead
+
+
+func hack_point() -> Vector3:
+	return global_position
+
+
+func on_hacked(game: Game) -> void:
+	hack_progress = 0.0
+	power_off()
+	game.light_killed(self, false)
+
+
+## Silent: the fixture just dies.
+func power_off() -> void:
+	if dead:
+		return
+	dead = true
+	light.light_energy = 0.0
+	light.visible = false
+	fixture_mat.emission_energy_multiplier = 0.0
+
+
 func shatter() -> void:
 	if dead:
 		return

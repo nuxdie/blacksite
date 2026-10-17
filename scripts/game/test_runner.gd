@@ -209,6 +209,81 @@ func _autotest() -> void:
 	_look_at(target.global_position + Vector3.UP * 1.2)
 	await _fire(3)
 	r["shotgun_close"] = {"hp": roundi(target.hp), "alive": target.alive, "mag": game.player.weapons.mag[0]}
+	# hacking
+	var hk := {}
+	await _fresh("carbine")
+	var cams := game.facility.devices.filter(func(d: Device) -> bool: return d.kind == Device.Kind.CAMERA)
+	var c1: Device = cams[0]
+	game.player.global_position = Vector3(-2, 0, -12)
+	await _frames(3)
+	_look_at(c1.hack_point())
+	await _frames(3)
+	hk["target_is_camera"] = game.hack_target == c1
+	Input.action_press("hack")
+	await _frames(170)
+	Input.action_release("hack")
+	hk["camera_looped"] = c1.looped > 0.0
+	await _fresh("carbine")
+	var c2: Device = cams[1]
+	game.player.global_position = Vector3(-15, 0, -27)
+	await _frames(3)
+	_look_at(c2.hack_point())
+	await _frames(600)
+	hk["camera_alarm"] = c2.alarm
+	hk["guards_dispatched"] = game.soldiers.filter(func(x: Soldier) -> bool: return x.state == Soldier.State.COMBAT).size()
+	await _fresh("carbine")
+	var relay: Device = game.facility.devices.filter(func(d: Device) -> bool: return d.kind == Device.Kind.RELAY)[0]
+	game.player.global_position = Vector3(-21, 3.7, 26)
+	await _frames(5)
+	_look_at(relay.hack_point())
+	await _frames(3)
+	Input.action_press("hack")
+	await _frames(260)
+	Input.action_release("hack")
+	hk["jammed"] = game.jam_t > 0.0
+	game.player.global_position = Vector3(-15, 0, -27)
+	await _frames(3)
+	_look_at(c2.hack_point())
+	await _frames(600)
+	hk["alarm_while_jammed"] = c2.alarm
+	hk["guards_dispatched_jammed"] = game.soldiers.filter(func(x: Soldier) -> bool: return x.state == Soldier.State.COMBAT).size()
+	await _fresh("carbine")
+	var term: Device = game.facility.devices.filter(func(d: Device) -> bool: return d.kind == Device.Kind.TERMINAL)[0]
+	_isolate([])
+	game.player.global_position = Vector3(-12.5, 0, -17.2)
+	await _frames(5)
+	_look_at(term.hack_point())
+	await _frames(3)
+	Input.action_press("interact")
+	await _frames(260)
+	Input.action_release("interact")
+	hk["cameras_offline"] = cams.all(func(d: Device) -> bool: return d.offline)
+	var lamp2: Lamp = game.facility.lamps[0]
+	game.player.global_position = lamp2.global_position + Vector3(6, 0, 0)
+	game.player.global_position.y = 0.0
+	await _frames(5)
+	_look_at(lamp2.hack_point())
+	await _frames(3)
+	Input.action_press("hack")
+	await _frames(90)
+	Input.action_release("hack")
+	hk["lamp_hacked_off"] = lamp2.dead
+	var laptop: Device = game.facility.devices.filter(func(d: Device) -> bool: return d.kind == Device.Kind.LAPTOP)[0]
+	game.player.global_position = Vector3(45.6, 4.2, 26.6)
+	await _frames(5)
+	_look_at(laptop.hack_point())
+	await _frames(3)
+	Input.action_press("interact")
+	await _frames(300)
+	Input.action_release("interact")
+	await _frames(20)
+	hk["download_partial"] = snappedf(laptop.hack_progress, 0.01)
+	_look_at(laptop.hack_point())
+	Input.action_press("interact")
+	await _frames(300)
+	Input.action_release("interact")
+	hk["mission_after_download"] = game.mission
+	r["hacking"] = hk
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -323,6 +398,14 @@ func _shots(dir: String) -> void:
 	game.spawn_gadget("smoke", game.player.global_position + game.player.forward() * 9.0 + Vector3.UP * 0.3, Vector3.ZERO, true)
 	await get_tree().create_timer(4.5).timeout
 	_snap(dir + "/smoke.png")
+	var cam: Device = game.facility.devices.filter(func(d: Device) -> bool: return d.kind == Device.Kind.CAMERA)[0]
+	game.player.global_position = Vector3(-2, 0, -12)
+	await get_tree().create_timer(0.2).timeout
+	_look_at(cam.hack_point())
+	Input.action_press("hack")
+	await get_tree().create_timer(1.3).timeout
+	_snap(dir + "/hack.png")
+	Input.action_release("hack")
 
 
 func _snap(path: String) -> void:
