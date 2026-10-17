@@ -47,6 +47,7 @@ func _isolate(keep: Array) -> void:
 			s.visible = false
 			s.death_t = 1.0
 			s.corpse_found = true
+			s.accounted = true
 			s.collision_layer = 0
 
 
@@ -378,6 +379,7 @@ func _autotest() -> void:
 	Input.action_release("aim")
 	hk["camera_shot_out"] = shot_cam.destroyed
 	r["security"] = hk
+	r["consequences"] = await _consequences()
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -406,6 +408,65 @@ func _autotest() -> void:
 	game.god_mode = true
 	r["ms"] = Time.get_ticks_msec() - t0
 	print("AUTOTEST ", JSON.stringify(r))
+
+
+## Radio checks, alarms, comms and wounds.
+func _consequences() -> Dictionary:
+	var c := {}
+	# a guard killed out of sight misses the next radio check; HQ goes to caution and sends people
+	await _fresh("carbine")
+	var victim := _find("wh", 26.0)
+	victim.die(Vector3.FORWARD, false, true)
+	victim.global_position = Vector3(26, 0, -9)
+	game.player.global_position = Vector3(24, 0, -11)
+	game.hq._check_t = 0.1
+	var investigated := false
+	for _i in 60 * 25:
+		await get_tree().physics_frame
+		if game.hq.stats.missed_checks > 0 and not c.has("level_after_check"):
+			c["level_after_check"] = Command.Level.keys()[game.hq.level]
+		investigated = investigated or game.soldiers.any(func(s: Soldier) -> bool: return s.alive and s.state == Soldier.State.SUSPICIOUS and s.investigate.distance_to(victim.post) < 1.0)
+	c["missed_checks"] = game.hq.stats.missed_checks
+	c["post_investigated"] = investigated
+	c["level_later"] = Command.Level.keys()[game.hq.level]
+	# a guard who spots you radios it in: alarm, and the reaction force is called
+	await _fresh("carbine")
+	var spotter := _find("yard", -10.0)
+	spotter.alert(game.player.global_position, "saw")
+	await _frames(60 * 5)
+	c["alarm_after_contact"] = Command.Level.keys()[game.hq.level]
+	c["qrf_called"] = game.hq.qrf_called
+	# the same contact with the relay down never reaches HQ
+	await _fresh("carbine")
+	game.comms_down = true
+	spotter = _find("yard", -10.0)
+	spotter.alert(game.player.global_position, "saw")
+	await _frames(60 * 5)
+	c["alarm_with_comms_down"] = Command.Level.keys()[game.hq.level]
+	# killing the spotter before the call goes out keeps HQ in the dark
+	await _fresh("carbine")
+	spotter = _find("yard", -10.0)
+	spotter.alert(game.player.global_position, "saw")
+	await _frames(30)
+	spotter.die(Vector3.FORWARD, true, false)
+	await _frames(60 * 5)
+	c["alarm_if_spotter_killed"] = Command.Level.keys()[game.hq.level]
+	# wounds bleed until bandaged; a leg hit stops sprinting until a medkit
+	await _fresh("carbine")
+	_isolate([])
+	game.god_mode = false
+	game.player.take_damage(30.0, game.player.global_position + Vector3.FORWARD * 10.0, false, "legs")
+	var hp0 := game.player.hp
+	await _frames(120)
+	c["bleeds"] = game.player.hp < hp0 - 0.3
+	c["leg_wound"] = game.player.leg_wound
+	game.player.start_bandage()
+	await _frames(int(Player.BANDAGE_TIME * 60.0) + 10)
+	c["bandaged"] = game.player.bleed == 0.0
+	game.player.treat()
+	c["splinted"] = not game.player.leg_wound
+	game.god_mode = true
+	return c
 
 
 func _sim(seconds: float) -> void:

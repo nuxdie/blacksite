@@ -25,6 +25,10 @@ var _feed_cam: Camera3D
 var _feed_rect: TextureRect
 var _trace_reason := ""
 var _trace_t := 0.0
+## Vitals and ammunition stay out of the way until they matter.
+var _vitals_a := 0.0
+var _ammo_a := 0.0
+var _ammo_seen := {}
 
 var _f_small: FontVariation
 var _f_label: FontVariation
@@ -149,6 +153,15 @@ func refresh(dt: float) -> void:
 			_dmg_dirs.remove_at(i)
 	hints.update(dt)
 	_trace_t = maxf(0.0, _trace_t - dt)
+	var w := p.weapons
+	var ammo_key := {"cur": w.cur, "mag": w.mag[w.cur], "sp": (w.spare[w.cur] as Array).size(), "id": w.current().id, "mode": w.mode[w.cur], "g": w.gsel}
+	if ammo_key != _ammo_seen:
+		_ammo_seen = ammo_key
+		_ammo_a = 4.0
+	var ammo_on := w.reload_t > 0.0 or p.ads > 0.5 or w.aiming_throw or w.mag[w.cur] <= w.current().mag_size * 0.25
+	_ammo_a = maxf(1.0 if ammo_on else 0.0, _ammo_a - dt)
+	var vit_on := p.hp < 70.0 or p.bleed > 0.0 or p.leg_wound or p.bandage_t >= 0.0 or p.last_hit < 4.0 or p.crouched or absf(p.lean_k) > 0.5 or p.drag_body != null
+	_vitals_a = minf(1.0, _vitals_a + dt * 4.0) if vit_on else maxf(0.0, _vitals_a - dt * 0.5)
 	var open := game.tablet_access != null
 	_feed_rect.visible = open
 	_feed_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if open else SubViewport.UPDATE_DISABLED
@@ -470,53 +483,75 @@ func _draw_arcs(c: Vector2) -> void:
 
 func _draw_vitals(size: Vector2) -> void:
 	var p := game.player
+	var a := clampf(_vitals_a, 0.0, 1.0)
+	if a <= 0.01:
+		return
 	var x := 34.0
 	var y := size.y - 34.0
 	var low := p.hp < 30.0
-	var col := Style.RED if low else Style.INK
+	var col := Color(Style.RED if low else Style.INK, a)
 	_text(Vector2(x, y - 26), str(ceili(p.hp)), 34, col, HORIZONTAL_ALIGNMENT_LEFT, _f_num)
-	for i in 4:
-		var r := Rect2(x + i * 56.0, y - 14, 52, 5)
-		_overlay.draw_rect(r, Style.FAINT)
-		var fill := clampf((p.hp - i * 25.0) / 25.0, 0.0, 1.0)
-		if fill > 0.0:
-			_overlay.draw_rect(Rect2(r.position, Vector2(r.size.x * fill, r.size.y)), col)
-	var stance := "DRAGGING" if p.drag_body else ("CROUCHED" if p.crouched else "STANDING")
+	var bar := Rect2(x, y - 14, 220, 4)
+	_overlay.draw_rect(bar, Color(Style.FAINT, Style.FAINT.a * a))
+	_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * p.hp / Player.MAX_HP, bar.size.y)), col)
+	if p.bleed > 0.0:
+		var lost := minf(p.hp, p.bleed * 10.0) / Player.MAX_HP * bar.size.x
+		var pulse := 0.45 + 0.4 * sin(game.time * 6.0)
+		_overlay.draw_rect(Rect2(bar.position.x + bar.size.x * p.hp / Player.MAX_HP - lost, bar.position.y, lost, bar.size.y), Color(Style.RED, pulse * a))
+	var bits: Array[String] = []
+	if p.drag_body:
+		bits.append("DRAGGING")
+	elif p.crouched:
+		bits.append("CROUCHED")
 	if absf(p.lean_k) > 0.5:
-		stance += "  ·  LEAN " + ("L" if p.lean_k < 0.0 else "R")
-	_text(Vector2(x, y + 6), stance, 13, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+		bits.append("LEAN " + ("L" if p.lean_k < 0.0 else "R"))
+	var bx := x
+	if not bits.is_empty():
+		bx += _text(Vector2(bx, y + 6), "  ·  ".join(bits), 13, Color(Style.DIM, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
+	if p.bandage_t >= 0.0:
+		bx += _text(Vector2(bx, y + 6), "BANDAGING  %d%%" % roundi(p.bandage_t / Player.BANDAGE_TIME * 100.0), 13, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
+	elif p.bleed > 0.0:
+		bx += _text(Vector2(bx, y + 6), "BLEEDING", 13, Color(Style.RED, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
+	if p.leg_wound:
+		_text(Vector2(bx, y + 6), "LEG WOUND", 13, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
 
 
 func _draw_ammo(size: Vector2) -> void:
 	var w := game.player.weapons
 	var cur := w.current()
+	var a := clampf(_ammo_a, 0.0, 1.0)
+	if a <= 0.01:
+		return
 	var x := size.x - 34.0
 	var y := size.y - 34.0
 	var m: int = w.mag[w.cur]
-	var col := Style.RED if m == 0 else (Style.AMBER if m <= cur.mag_size * 0.25 else Style.INK)
-	_text(Vector2(x, y - 26), "—" if w.reload_t > 0.0 else str(m), 42, col, HORIZONTAL_ALIGNMENT_RIGHT, _f_num)
+	var col := Color(Style.RED if m == 0 else (Style.AMBER if m <= cur.mag_size * 0.25 else Style.INK), a)
+	var busy := w.reload_t > 0.0 and not w.tube_loading
+	_text(Vector2(x, y - 26), "—" if busy else str(m), 42, col, HORIZONTAL_ALIGNMENT_RIGHT, _f_num)
 	var sp: Array = w.spares()
-	var px := x
-	for i in range(sp.size() - 1, -1, -1):
-		px -= 9.0
-		var r := Rect2(px, y - 18, 6, 14)
-		_overlay.draw_rect(r, Color(Style.INK, 0.5), false, 1.0)
-		var fill := float(sp[i]) / cur.mag_size
-		_overlay.draw_rect(Rect2(r.position.x, r.end.y - r.size.y * fill, r.size.x, r.size.y * fill), Style.INK)
-	if sp.is_empty():
-		_text(Vector2(x, y - 6), "NO SPARE MAGAZINES", 12, Style.RED, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+	if cur.tube_fed:
+		var n := w.loose_shells()
+		_text(Vector2(x, y - 6), "+%d SHELLS" % n if n > 0 else "NO SHELLS", 12, Color(Style.DIM if n > 0 else Style.RED, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+	else:
+		var px := x
+		for i in range(sp.size() - 1, -1, -1):
+			px -= 9.0
+			var r := Rect2(px, y - 18, 6, 14)
+			_overlay.draw_rect(r, Color(Style.INK, 0.5 * a), false, 1.0)
+			var fill := float(sp[i]) / cur.mag_size
+			_overlay.draw_rect(Rect2(r.position.x, r.end.y - r.size.y * fill, r.size.x, r.size.y * fill), Color(Style.INK, a))
+		if sp.is_empty():
+			_text(Vector2(x, y - 6), "NO SPARE MAGAZINES", 12, Color(Style.RED, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
 	var line := cur.display_name + "  ·  " + cur.caliber
 	if cur.modes.size() > 1:
 		line += "  ·  " + w.fire_mode()
-	if cur.suppressed:
-		line += "  ·  SUPPRESSED"
-	_text(Vector2(x, y + 6), line, 13, Style.DIM, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+	_text(Vector2(x, y + 6), line, 13, Color(Style.DIM, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
 	var gx := x
 	for i in range(w.gadgets.size() - 1, -1, -1):
 		var g: Dictionary = w.gadgets[i]
 		var t := "%s %d" % [Gadget.INFO[g.type].name, int(g.n)]
 		var sel := i == w.gsel
-		gx -= _text(Vector2(gx, y + 24), t, 13, Style.INK if sel else Style.DIM, HORIZONTAL_ALIGNMENT_RIGHT, _f_small) + 16.0
+		gx -= _text(Vector2(gx, y + 24), t, 13, Color(Style.INK if sel else Style.DIM, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small) + 16.0
 
 
 ## Context: only what you can do right now.
@@ -533,6 +568,8 @@ func _prompts() -> Array:
 	if p.drag_body:
 		out.append([["interact"], "Release to drop"])
 		return out
+	if p.bleed > 0.0 and p.bandage_t < 0.0 and p.bandages > 0:
+		out.append([["bandage"], "Bandage  ·  %d left" % p.bandages])
 	if game.tablet_access:
 		return out
 	if game.using and game.use_target:

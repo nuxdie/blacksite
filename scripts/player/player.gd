@@ -18,6 +18,7 @@ const LEAN := 0.42
 const FOV := 74.0
 const BREATH := 4.0
 const MAX_HP := 100.0
+const BANDAGE_TIME := 3.2
 
 @onready var col: CollisionShape3D = $Collision
 @onready var head: Node3D = $Head
@@ -60,6 +61,12 @@ var hacking := false
 ## Working the security tablet: no moving, no looking around.
 var in_tablet := false
 var drag_snd := 0.0
+## Wounds don't heal by themselves: open wounds bleed until bandaged, a leg hit stops you running
+## until a medkit splints it.
+var bleed := 0.0
+var leg_wound := false
+var bandages := 2
+var bandage_t := -1.0
 var vault_t := -1.0
 var vault_from := Vector3.ZERO
 var vault_to := Vector3.ZERO
@@ -105,6 +112,10 @@ func spawn(pos: Vector3) -> void:
 	breath = BREATH
 	breath_out = 0.0
 	trauma = 0.0
+	bleed = 0.0
+	leg_wound = false
+	bandages = 2
+	bandage_t = -1.0
 	weapons.equip(Settings.primary, Settings.gadgets)
 
 
@@ -148,7 +159,7 @@ func speed_2d() -> float:
 
 
 func can_fire() -> bool:
-	return alive and active and not hacking and not in_tablet and not sprinting and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
+	return alive and active and not hacking and not in_tablet and not sprinting and bandage_t < 0.0 and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
 
 
 func _ray(from: Vector3, to: Vector3) -> Dictionary:
@@ -204,6 +215,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		weapons.cycle_gadget()
 	elif event.is_action_pressed("interact"):
 		game.interact()
+	elif event.is_action_pressed("bandage"):
+		start_bandage()
 	elif event.is_action_pressed("mark"):
 		game.mark_target()
 		game.hud.learn("mark")
@@ -247,10 +260,10 @@ func tick(dt: float) -> void:
 	elif not want_crouch and crouched and _can_stand():
 		_set_height(H_STAND)
 	crouch_k = lerpf(crouch_k, 1.0 if crouched else 0.0, minf(1.0, dt * 10.0))
-	sprinting = sprint_key and f > 0.0 and not crouched and ads < 0.3 and weapons.reload_t <= 0.0 and is_on_floor() and drag_body == null
+	sprinting = sprint_key and f > 0.0 and not crouched and ads < 0.3 and weapons.reload_t <= 0.0 and is_on_floor() and drag_body == null and not leg_wound and bandage_t < 0.0
 	if sprinting:
 		game.hud.learn("sprint")
-	var aim_want := Input.is_action_pressed("aim") and not sprinting and weapons.switch_t <= 0.0 and not weapons.aiming_throw and weapons.throw_t <= 0.0 and drag_body == null and vault_t < 0.0
+	var aim_want := Input.is_action_pressed("aim") and bandage_t < 0.0 and not sprinting and weapons.switch_t <= 0.0 and not weapons.aiming_throw and weapons.throw_t <= 0.0 and drag_body == null and vault_t < 0.0
 	ads = clampf(ads + (dt * (4.5 if w.scoped else 6.0) if aim_want else -dt * 7.0), 0.0, 1.0)
 	if ads > 0.5:
 		game.hud.learn("aim")
@@ -298,10 +311,9 @@ func tick(dt: float) -> void:
 
 	supp = maxf(0.0, supp - dt * 0.45)
 	last_hit += dt
-	if last_hit > 5.0 and hp < MAX_HP:
-		var cap := ceilf(hp / 25.0 - 0.000001) * 25.0
-		if hp < cap:
-			hp = minf(cap, hp + dt * 7.0)
+	_tick_wounds(dt)
+	if not alive:
+		return
 	if hp < 30.0:
 		heart_t -= dt
 		if heart_t <= 0.0:
@@ -325,8 +337,10 @@ func _move(dt: float, wish: Vector3, w: WeaponData) -> void:
 		speed = SPRINT
 	if drag_body:
 		speed = minf(speed, DRAG_SPEED)
-	if hacking:
+	if hacking or bandage_t >= 0.0:
 		speed *= 0.5
+	if leg_wound:
+		speed *= 0.7
 	speed *= lerpf(1.0, 0.4 if w.scoped else 0.6, ads) * (0.6 if absf(lean_k) > 0.3 else 1.0) * (1.0 - supp * 0.25)
 	var target := wish * speed
 	if is_on_floor():
@@ -606,7 +620,7 @@ func ray_hit(o: Vector3, d: Vector3) -> Dictionary:
 	return best
 
 
-func take_damage(amount: float, from: Vector3, through_wall := false) -> void:
+func take_damage(amount: float, from: Vector3, through_wall := false, zone := "body") -> void:
 	if not alive or game.god_mode:
 		return
 	hp -= amount
@@ -614,16 +628,67 @@ func take_damage(amount: float, from: Vector3, through_wall := false) -> void:
 	game.stats.damage_taken += amount
 	trauma = minf(1.0, trauma + clampf(amount / 30.0, 0.1, 0.4))
 	supp = minf(1.0, supp + 0.25)
+	bleed = minf(2.0, bleed + amount * 0.008)
+	if zone == "legs" and not leg_wound:
+		leg_wound = true
+		game.hud.hint_event("leg_wound")
 	game.hud.on_damage(amount, from)
 	if through_wall:
 		game.hud.hint_event("penetrated")
 	Sfx.play("hurt", -3.0)
 	if hp <= 0.0:
-		hp = 0.0
-		alive = false
-		drag_body = null
-		weapons.aiming_throw = false
-		game.on_player_died()
+		_die()
+
+
+func _die() -> void:
+	hp = 0.0
+	alive = false
+	drag_body = null
+	bandage_t = -1.0
+	weapons.aiming_throw = false
+	game.on_player_died()
+
+
+func _tick_wounds(dt: float) -> void:
+	if bandage_t >= 0.0:
+		bandage_t += dt
+		if bandage_t >= BANDAGE_TIME:
+			bandage_t = -1.0
+			bleed = 0.0
+			Sfx.play("cloth")
+			game.hud.learn("bleeding")
+	if bleed > 0.0 and not game.god_mode:
+		hp -= bleed * dt
+		bleed = maxf(0.0, bleed - dt * 0.004)
+		game.hud.hint_event("bleeding")
+		if hp <= 0.0:
+			_die()
+
+
+func start_bandage() -> void:
+	if bandage_t >= 0.0 or bleed <= 0.0 or not alive:
+		return
+	if bandages <= 0:
+		game.hud.toast("NO BANDAGES  ·  FIND A MEDKIT")
+		return
+	bandages -= 1
+	bandage_t = 0.0
+	weapons.reload_t = 0.0
+	weapons.tube_loading = false
+	drag_body = null
+	Sfx.play("cloth")
+
+
+## Medkit: closes wounds, splints a leg, restores health.
+func treat() -> void:
+	hp = minf(MAX_HP, hp + 50.0)
+	bleed = 0.0
+	leg_wound = false
+	bandages = maxi(bandages, 2)
+
+
+func needs_treatment() -> bool:
+	return hp < MAX_HP or bleed > 0.0 or leg_wound
 
 
 func near_miss(amount: float, point: Vector3) -> void:

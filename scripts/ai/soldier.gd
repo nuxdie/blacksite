@@ -76,6 +76,15 @@ var repath := 0.0
 ## A job security sent this guard to do: walk to pos and work on device.
 var task: Dictionary = {}
 var carries_badge := false
+## Radio identity, and where they're supposed to be standing.
+var callsign := ""
+var call_order := 0
+var post := Vector3.ZERO
+var post_yaw := 0.0
+## HQ already knows this one is gone (missed a check, or the body was found).
+var accounted := false
+## A hit to the legs slows them for good.
+var limp := 1.0
 
 
 func setup(p_profile: SoldierProfile, p_squad: Squad, pos: Vector3, p_yaw: float, p_patrol: Array) -> void:
@@ -85,6 +94,8 @@ func setup(p_profile: SoldierProfile, p_squad: Squad, pos: Vector3, p_yaw: float
 	mag = profile.mag_size
 	grenades = profile.grenades
 	position = pos
+	post = pos
+	post_yaw = p_yaw
 	yaw = p_yaw
 	base_yaw = p_yaw
 	look_yaw = p_yaw
@@ -185,8 +196,8 @@ func steer() -> Vector3:
 
 func ground_move(dir: Vector3, speed: float, dt: float) -> void:
 	var k := minf(1.0, 10.0 * dt)
-	velocity.x = lerpf(velocity.x, dir.x * speed, k)
-	velocity.z = lerpf(velocity.z, dir.z * speed, k)
+	velocity.x = lerpf(velocity.x, dir.x * speed * limp, k)
+	velocity.z = lerpf(velocity.z, dir.z * speed * limp, k)
 
 
 func steer_to(p: Vector3) -> Vector3:
@@ -212,8 +223,11 @@ func alert(pos: Vector3, how: String) -> void:
 		think_t = react
 		aim_err = 0.16
 		game.detected = true
-		var line := {"saw": "contact", "body": "body", "radio": "radio"}.get(how, "heard") as String
-		say(line, how != "radio")
+		var line := {"saw": "contact", "body": "body", "radio": "radio", "shout": "radio"}.get(how, "heard") as String
+		say(line, how != "radio" and how != "shout")
+		if how != "radio" and how != "shout":
+			game.shout(self, pos)
+			game.hq.contact(self, pos, how)
 		for o in squad.members:
 			if o != self and o.alive and o.state != State.COMBAT:
 				game.radio_alert(o, randf_range(0.4, 1.4))
@@ -257,12 +271,14 @@ func _perceive(dt: float) -> void:
 		var move := 0.45 if hs < 0.5 else (1.6 if p.sprinting else 1.0)
 		var center := clampf((fwd_dot - 0.2) / 0.7, 0.35, 1.0)
 		var exposure := 1.0 if sees_chest else 0.55
-		var rate := 1.9 / (1.0 + dist_p / 8.0) * stance * move * center * exposure * game.player_light
+		var rate := 1.9 / (1.0 + dist_p / 8.0) * stance * move * center * exposure * game.player_light * game.hq.vigilance()
 		aware += rate * dt * (1.5 if state == State.SUSPICIOUS else 1.0) + (dt * 2.0 if dist_p < 3.5 else 0.0)
 		investigate = p.global_position
 	else:
 		aware = maxf(0.0, aware - dt * 0.06)
 	var loud := 11.0 if p.sprinting else (0.0 if p.crouched else (4.0 if p.speed_2d() > 1.0 else 0.0))
+	if game.hq.level == Command.Level.ALARM:
+		loud *= 0.5
 	if loud > 0.0 and global_position.distance_to(p.global_position) < loud:
 		aware += dt * 0.6
 		investigate = p.global_position
@@ -292,6 +308,7 @@ func _check_corpses(dt: float) -> void:
 			continue
 		if game.los(eye(), c.global_position + Vector3.UP * 0.3):
 			c.corpse_found = true
+			c.accounted = true
 			alert(c.global_position, "body")
 			squad.last_known_time = game.time - 6.0
 			return
@@ -346,7 +363,7 @@ func tick(dt: float) -> void:
 	crouch_k = lerpf(crouch_k, 1.0 if crouch else 0.0, minf(1.0, dt * 7.0))
 	model.rotation.y = yaw
 	model.animate(dt, self)
-	model.flashlight.visible = alive and blind <= 0.0 and (state == State.SUSPICIOUS or mode == Mode.SEARCH or (state == State.CALM and not patrol.is_empty()))
+	model.flashlight.visible = alive and blind <= 0.0 and (state == State.SUSPICIOUS or mode == Mode.SEARCH or (state == State.CALM and (not patrol.is_empty() or game.hq.level != Command.Level.NORMAL)))
 
 
 func _check_stuck(dt: float) -> void:
@@ -389,12 +406,24 @@ func _calm(dt: float) -> void:
 			else:
 				ground_move(dir, profile.walk_speed, dt)
 				turn_to(yaw_of(dir), 3.0, dt)
+	elif Vector2(post.x - global_position.x, post.z - global_position.z).length() > 1.2:
+		repath -= dt
+		if repath <= 0.0:
+			go_to(post)
+			repath = 4.0
+		var back := steer()
+		if back == Vector3.ZERO:
+			back = steer_to(post)
+		ground_move(back, profile.walk_speed, dt)
+		if back != Vector3.ZERO:
+			turn_to(yaw_of(back), 3.0, dt)
+		base_yaw = post_yaw
 	else:
 		ground_move(Vector3.ZERO, 0.0, dt)
 		look_t -= dt
 		if look_t <= 0.0:
-			look_t = randf_range(3.0, 7.0)
-			look_yaw = base_yaw + randf_range(-0.9, 0.9)
+			look_t = randf_range(3.0, 7.0) / game.hq.vigilance()
+			look_yaw = base_yaw + randf_range(-0.9, 0.9) * game.hq.vigilance()
 		turn_to(look_yaw, 0.8, dt)
 	_check_corpses(dt)
 
@@ -418,13 +447,11 @@ func _suspicious(dt: float) -> void:
 		ground_move(Vector3.ZERO, 0.0, dt)
 		turn_to(yaw + 1.0, 1.2, dt)
 	_check_corpses(dt)
-	if (aware < 0.15 and susp_t > 8.0) or susp_t > 20.0:
+	if (aware < 0.15 and susp_t > 8.0 * game.hq.vigilance()) or susp_t > 20.0 * game.hq.vigilance():
 		state = State.CALM
 		aware = 0.0
 		say("calm")
-		if patrol.is_empty():
-			base_yaw = yaw
-		else:
+		if not patrol.is_empty():
 			wait_t = 1.0
 			repath = 0.0
 
@@ -800,6 +827,8 @@ func take_hit(amount: float, dir: Vector3, zone: String, from_player: bool, quie
 		return
 	hp -= amount
 	flinch = 0.22
+	if zone == "legs":
+		limp = 0.55
 	aim_err += 0.04
 	supp = minf(1.0, supp + 0.3)
 	if hp <= 0.0:

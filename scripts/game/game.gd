@@ -75,6 +75,7 @@ var using := false
 var use_progress: Dictionary = {}
 var _repairs: Array[Dictionary] = []
 var _body_scan_t := 0.0
+var hq := Command.new(self)
 
 
 func _ready() -> void:
@@ -174,6 +175,7 @@ func start_mission() -> void:
 	using = false
 	use_progress.clear()
 	_repairs.clear()
+	hq.reset()
 	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
 	player.spawn(facility.player_start)
 	player.active = true
@@ -193,6 +195,9 @@ func _spawn(r: Dictionary) -> Soldier:
 	s.game = self
 	s.setup(load("res://resources/soldiers/%s.tres" % r.type), squads[sq_id], r.pos, r.get("yaw", 0.0), r.get("patrol", []))
 	s.carries_badge = r.get("badge", false)
+	var sq_n := (squads[sq_id] as Squad).members.size()
+	s.callsign = "%s %d" % [{"yard": "Gate", "office": "Office", "wh": "Warehouse", "qrf": "Reaction"}.get(sq_id, "Post"), sq_n]
+	s.call_order = soldiers.size()
 	add_child(s)
 	soldiers.append(s)
 	return s
@@ -255,10 +260,16 @@ func _complete() -> void:
 	_capture(false)
 
 
+func bodies_found() -> int:
+	return soldiers.filter(func(s: Soldier) -> bool: return not s.alive and s.corpse_found).size()
+
+
 func _rating() -> String:
 	var acc := float(stats.hits) / maxf(1.0, float(stats.shots))
-	if not detected:
+	if not detected and hq.stats.alarms == 0 and bodies_found() == 0:
 		return "GHOST"
+	if hq.stats.alarms == 0:
+		return "QUIET PROFESSIONAL"
 	if stats.damage_taken < 60.0 and acc > 0.45:
 		return "SURGICAL"
 	return "PROFESSIONAL" if stats.damage_taken < 150.0 else "SURVIVOR"
@@ -308,6 +319,7 @@ func _physics_process(dt: float) -> void:
 	_tick_pickups()
 	_tick_radio()
 	_tick_devices(sdt)
+	hq.tick(sdt)
 	_tick_mission(sdt)
 
 
@@ -344,13 +356,13 @@ func _tick_mission(dt: float) -> void:
 		reinforce_t -= dt
 		if reinforce_t <= 0.0:
 			Sfx.play_at("truck", Vector3(6, 1, 33))
-			hud.banner("ENEMY REINFORCEMENTS")
+			hud.subtitle("HQ", (Command.LINES.qrf as Array).pick_random())
 			for r: Dictionary in REINFORCEMENTS:
 				var s := _spawn(r)
 				s.state = Soldier.State.COMBAT
 				s.react = randf_range(0.5, 1.5)
 			var q: Squad = squads["qrf"]
-			q.report(player.global_position, time - 4.0)
+			q.report(player.global_position if hq.level == Command.Level.ALARM else facility.intel_pos, time - 4.0)
 	if mission == "extract":
 		_beacon.rotate_y(dt * 0.5)
 		if player.alive and Vector2(player.global_position.x - facility.extraction.x, player.global_position.z - facility.extraction.z).length() < 4.0:
@@ -375,17 +387,9 @@ func objective_text() -> String:
 
 func _take_intel() -> void:
 	mission = "extract"
-	reinforce_t = 7.0
 	Sfx.play("objective")
 	hud.banner("DRIVE RECOVERED")
 	_beacon.visible = true
-	for s in soldiers:
-		if s.alive:
-			s.squad.report(facility.intel_pos, time - 5.0)
-			if s.state != Soldier.State.COMBAT:
-				s.state = Soldier.State.COMBAT
-				s.react = randf_range(0.5, 2.0)
-				s.mode = Soldier.Mode.IDLE
 
 
 # ------------------------------------------------------------------ sight & sound
@@ -431,6 +435,16 @@ func radio_alert(s: Soldier, delay: float) -> void:
 	if comms_down:
 		return
 	_pending_radio.append({"s": s, "t": time + delay})
+
+
+## Shouting carries without a radio: nearby guards of any squad hear it.
+func shout(from: Soldier, pos: Vector3) -> void:
+	for o in soldiers:
+		if o == from or not o.alive or o.state == Soldier.State.COMBAT:
+			continue
+		var d := o.global_position.distance_to(from.global_position)
+		if d < 12.0 or (d < 28.0 and los(o.eye(), from.eye())):
+			o.alert(pos, "shout")
 
 
 func _tick_radio() -> void:
@@ -641,7 +655,7 @@ func soldier_shot(s: Soldier, target: Vector3, extra: float, suppressive: bool) 
 			if prof.weapon_kind == "shotgun":
 				dmg *= clampf(1.4 - end_t / 14.0, 0.25, 1.0)
 			stats.enemy_hits += 1
-			player.take_damage(dmg, muzzle, int(res.pens) > 0)
+			player.take_damage(dmg, muzzle, int(res.pens) > 0, zone)
 		else:
 			var t := clampf((eye - muzzle).dot(d), 0.0, end_t)
 			var cp := muzzle + d * t
@@ -959,6 +973,26 @@ func _zone_of(p: Vector3) -> String:
 
 func _schedule_repair(dv: Device, delay: float) -> void:
 	_repairs.append({"device": dv, "t": time + delay})
+	hq.caution("device")
+
+
+## HQ sends the nearest guards to a contact.
+func dispatch_to(pos: Vector3, count: int) -> void:
+	var near := soldiers.filter(func(s: Soldier) -> bool: return s.alive and s.state != Soldier.State.COMBAT and s.task.is_empty())
+	near.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.global_position.distance_to(pos) < b.global_position.distance_to(pos))
+	for i in mini(count, near.size()):
+		var s: Soldier = near[i]
+		s.squad.report(pos, time - 3.0)
+		s.alert(pos, "radio")
+
+
+## A guard missed a radio check: two others go and look at their post.
+func investigate_post(pos: Vector3) -> void:
+	var near := soldiers.filter(func(s: Soldier) -> bool: return s.alive and s.state == Soldier.State.CALM and s.task.is_empty())
+	near.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.global_position.distance_to(pos) < b.global_position.distance_to(pos))
+	for i in mini(2, near.size()):
+		var s: Soldier = near[i]
+		s.make_suspicious(pos, 0.9, "search", 0.5)
 
 
 ## Someone gets sent to fix whatever stopped working.
@@ -1028,6 +1062,7 @@ func camera_alarm(cam: Device) -> void:
 		return
 	hud.subtitle("SECURITY", "Intruder on %s." % cam.label)
 	_dispatch(player.global_position, "saw")
+	hq.camera_contact(player.global_position)
 
 
 func camera_report(_cam: Device) -> void:
@@ -1128,11 +1163,11 @@ func interact() -> void:
 		return
 	match p.kind:
 		Pickup.Kind.MEDKIT:
-			if player.hp >= Player.MAX_HP:
-				hud.toast("HEALTH FULL")
+			if not player.needs_treatment():
+				hud.toast("NOT HURT")
 				return
-			player.hp = minf(Player.MAX_HP, player.hp + 50.0)
-			hud.toast("+50 HEALTH")
+			player.treat()
+			hud.toast("WOUNDS TREATED")
 		Pickup.Kind.AMMO:
 			player.weapons.resupply()
 			hud.toast("RESUPPLIED")

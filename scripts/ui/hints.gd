@@ -32,7 +32,11 @@ var defs: Array[Dictionary] = [
 	{"id": "drag", "keys": ["interact"], "text": "Hold near a body to drag it out of sight", "trigger": "kill"},
 	{"id": "calibers", "keys": [], "text": "Guards drop their own weapons. Rounds only fit weapons of the same caliber", "trigger": "scavenge_seen", "info": true},
 	{"id": "fire_mode", "keys": ["fire_mode"], "text": "Semi-auto for long-range control", "trigger": "long_bursts"},
-	{"id": "health", "keys": [], "text": "Health recovers to the top of its segment if you avoid damage", "trigger": "hurt", "info": true},
+	{"id": "bleeding", "keys": ["bandage"], "text": "You're bleeding — wounds don't close on their own", "trigger": "bleeding"},
+	{"id": "leg_wound", "keys": [], "text": "Leg wound: you can't run until a medkit splints it", "trigger": "leg_wound", "info": true},
+	{"id": "checkin", "keys": [], "text": "Guards check in by radio. A dead guard can't answer — HQ will send someone to their post", "trigger": "checkin", "info": true},
+	{"id": "caution", "keys": [], "text": "The site is on caution now: sharper eyes, flashlights on. It won't calm down tonight", "trigger": "caution", "info": true},
+	{"id": "alarm", "keys": [], "text": "Alarm raised — a reaction force is on its way. Kill a guard before they radio it in and it never happens", "trigger": "alarm", "info": true},
 	{"id": "penetrated", "keys": [], "text": "Thin walls don't stop rifle rounds — get behind concrete or steel", "trigger": "penetrated", "info": true},
 ]
 
@@ -101,8 +105,14 @@ func _condition(trigger: String) -> bool:
 			return _events.has("kill") and not game.detected
 		"long_bursts":
 			return p.weapons.auto_bursts >= 3 and p.weapons.current().modes.size() > 1
-		"hurt":
-			return p.hp < 60.0
+		"checkin", "caution":
+			return _events.has(trigger)
+		"alarm":
+			return game.hq.level == Command.Level.ALARM
+		"bleeding":
+			return _events.has("bleeding") and p.bleed > 0.0 and p.bandage_t < 0.0
+		"leg_wound":
+			return _events.has("leg_wound")
 		"scavenge_seen":
 			return _events.has("kill") and game.player.alive
 		"camera_in_view":
