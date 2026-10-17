@@ -1,0 +1,31 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/weapon_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "ar7"
+display_name = "AR-7"
+description = "The guards' rifle. Heavier round, harder kick, punches through more."
+mag_size = 30
+spare_mags = 3
+rpm = 600.0
+damage = 38.0
+head_mult = 3.2
+hip_spread = 0.035
+ads_spread = 0.002
+kick = 0.017
+kick_yaw = 0.007
+reload_time = 2.4
+reload_empty_time = 2.9
+penetration = 0.65
+effective_range = 50.0
+loudness = 50.0
+suppressed = false
+modes = PackedStringArray("AUTO", "SEMI")
+ads_fov = 50.0
+scoped = false
+tracer_chance = 0.35
+sound = "rifle"
+caliber = "7.62"
+pellets = 1

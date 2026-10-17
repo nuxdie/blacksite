@@ -1,0 +1,31 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/weapon_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "shotgun"
+display_name = "BRX-12"
+description = "Pump shotgun. Devastating inside a room, useless across the yard."
+mag_size = 7
+spare_mags = 3
+rpm = 70.0
+damage = 14.0
+head_mult = 1.5
+hip_spread = 0.06
+ads_spread = 0.045
+kick = 0.05
+kick_yaw = 0.012
+reload_time = 2.6
+reload_empty_time = 3.0
+penetration = 0.08
+effective_range = 12.0
+loudness = 50.0
+suppressed = false
+modes = PackedStringArray("SEMI")
+ads_fov = 60.0
+scoped = false
+tracer_chance = 0.0
+sound = "enemy_shotgun"
+caliber = "12ga"
+pellets = 9

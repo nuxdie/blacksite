@@ -28,3 +28,7 @@ extends Resource
 @export var scoped := false
 @export var tracer_chance := 0.35
 @export var sound := "rifle"
+## Ammunition family. Weapons that share one share loose rounds.
+@export var caliber := "5.56"
+## Projectiles per shot (shotguns).
+@export var pellets := 1

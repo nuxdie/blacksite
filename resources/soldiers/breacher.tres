@@ -26,3 +26,5 @@ weapon_kind = "shotgun"
 visor_color = Color(0.251, 0.816, 1, 1)
 uniform_color = Color(0.227, 0.204, 0.188, 1)
 doctrine = "rush"
+weapon_id = "shotgun"
+carried_rounds = 14

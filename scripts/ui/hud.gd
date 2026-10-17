@@ -345,7 +345,7 @@ func _draw_ammo(size: Vector2) -> void:
 		_overlay.draw_rect(Rect2(r.position.x, r.end.y - r.size.y * fill, r.size.x, r.size.y * fill), Style.INK)
 	if sp.is_empty():
 		_text(Vector2(x, y - 6), "NO SPARE MAGAZINES", 12, Style.RED, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
-	var line := cur.display_name
+	var line := cur.display_name + "  ·  " + cur.caliber
 	if cur.modes.size() > 1:
 		line += "  ·  " + w.fire_mode()
 	if cur.suppressed:
@@ -382,6 +382,9 @@ func _prompts() -> Array:
 			out.append([["interact"], it.label()])
 		elif game.corpse_near():
 			out.append([["interact"], "Hold to drag body"])
+	var junk := game.useless_rounds_near()
+	if junk:
+		out.append([[], "%s rounds  ·  none of your weapons take them" % junk.caliber])
 	if p.vault_ok:
 		out.append([["jump"], "Vault"])
 	if p.crouched and p.low_cover_ahead and p.ads < 0.3:

@@ -171,6 +171,12 @@ func lamp(x: float, y: float, z: float, color: Color, energy: float, rng: float,
 	lamps.append(l)
 
 
+func place(p: Pickup) -> Pickup:
+	add_child(p)
+	pickups.append(p)
+	return p
+
+
 func add_pickup(kind: Pickup.Kind, pos: Vector3, amount := 1, permanent := true) -> Pickup:
 	var p := Pickup.create(kind, pos, amount, permanent)
 	add_child(p)

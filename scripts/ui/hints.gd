@@ -26,6 +26,7 @@ var defs: Array[Dictionary] = [
 	{"id": "gadget", "keys": ["gadget"], "text": "Hold to aim equipment, release to throw", "trigger": "gadget_time"},
 	{"id": "gadget_cycle", "keys": ["gadget_cycle"], "text": "Switch equipment", "trigger": "after_gadget"},
 	{"id": "drag", "keys": ["interact"], "text": "Hold near a body to drag it out of sight", "trigger": "kill"},
+	{"id": "calibers", "keys": [], "text": "Guards drop their own weapons. Rounds only fit weapons of the same caliber", "trigger": "scavenge_seen", "info": true},
 	{"id": "fire_mode", "keys": ["fire_mode"], "text": "Semi-auto for long-range control", "trigger": "long_bursts"},
 	{"id": "health", "keys": [], "text": "Health recovers to the top of its segment if you avoid damage", "trigger": "hurt", "info": true},
 	{"id": "penetrated", "keys": [], "text": "Thin walls don't stop rifle rounds — get behind concrete or steel", "trigger": "penetrated", "info": true},
@@ -98,6 +99,8 @@ func _condition(trigger: String) -> bool:
 			return p.weapons.auto_bursts >= 3 and p.weapons.current().modes.size() > 1
 		"hurt":
 			return p.hp < 60.0
+		"scavenge_seen":
+			return _events.has("kill") and game.player.alive
 		"penetrated":
 			return _events.has("penetrated")
 	return false

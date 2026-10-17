@@ -26,3 +26,5 @@ weapon_kind = "lmg"
 visor_color = Color(1, 0.627, 0.125, 1)
 uniform_color = Color(0.165, 0.173, 0.188, 1)
 doctrine = "advance"
+weapon_id = "lmg"
+carried_rounds = 80

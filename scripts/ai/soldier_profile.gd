@@ -26,5 +26,9 @@ extends Resource
 @export var weapon_kind := "rifle"
 @export var visor_color := Color("ff3a1a")
 @export var uniform_color := Color("3c4436")
+## The WeaponData id this guard carries, dropped on death.
+@export var weapon_id := "ar7"
+## Loose rounds of that weapon's caliber carried in pouches.
+@export var carried_rounds := 60
 ## hold | advance | rush
 @export var doctrine := "hold"

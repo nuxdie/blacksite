@@ -27,3 +27,4 @@ ads_fov = 56.0
 scoped = false
 tracer_chance = 0.0
 sound = "sd_smg"
+caliber = "9mm"

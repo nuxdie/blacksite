@@ -166,6 +166,49 @@ func _autotest() -> void:
 		game.player._start_vault()
 		await _frames(40)
 	r["vault_end"] = game.player.global_position.snappedf(0.1)
+	# scavenging: a rifleman drops his AR-7 and 7.62 rounds; the carbine can't use them, the AR-7 can
+	await _fresh("carbine")
+	e = _find("yard", -10.0)
+	_isolate([e])
+	e.die(Vector3.FORWARD, false, true)
+	await _frames(60)
+	var gun: Pickup = null
+	var ammo: Pickup = null
+	for p in game.facility.pickups:
+		if p.taken:
+			continue
+		if p.kind == Pickup.Kind.WEAPON:
+			gun = p
+		elif p.kind == Pickup.Kind.ROUNDS:
+			ammo = p
+	var sc := {"weapon": gun.weapon.id if gun else "", "rounds": ammo.amount if ammo else 0, "caliber": ammo.caliber if ammo else ""}
+	game.player.global_position = ammo.global_position
+	await _frames(10)
+	sc["carbine_took_rounds"] = ammo.taken or ammo.amount < 60
+	game.player.global_position = gun.global_position + Vector3(0, 0, 1.2)
+	await _frames(2)
+	_look_at(gun.global_position + Vector3.UP * 0.15)
+	await _frames(2)
+	game.interact()
+	await _frames(40)
+	sc["primary_after_swap"] = game.player.weapons.slots[0].id
+	var spares_before := (game.player.weapons.spare[0] as Array).size()
+	game.player.global_position = ammo.global_position
+	await _frames(10)
+	sc["ar7_spares"] = [spares_before, (game.player.weapons.spare[0] as Array).size()]
+	sc["carbine_on_ground"] = game.facility.pickups.any(func(p: Pickup) -> bool: return not p.taken and p.kind == Pickup.Kind.WEAPON and p.weapon.id == "carbine")
+	r["scavenge"] = sc
+	# shotgun pellets: a breacher's own shotgun at close range
+	await _fresh("carbine")
+	var target := _find("office", -15.0)
+	_isolate([target])
+	target.global_position = Vector3(-15, 0, 26)
+	game.player.weapons.swap_primary(load("res://resources/weapons/shotgun.tres"), 7, [7, 7])
+	game.player.global_position = Vector3(-15, 0, 30)
+	await _frames(40)
+	_look_at(target.global_position + Vector3.UP * 1.2)
+	await _fire(3)
+	r["shotgun_close"] = {"hp": roundi(target.hp), "alive": target.alive, "mag": game.player.weapons.mag[0]}
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)

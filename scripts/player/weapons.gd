@@ -126,6 +126,54 @@ func add_mag(slot: int, rounds: int) -> bool:
 	return true
 
 
+## Loads loose rounds into spare magazines of every carried weapon that takes this caliber.
+## Returns how many rounds were used.
+func take_rounds(caliber: String, count: int) -> int:
+	var left := count
+	for i in slots.size():
+		var w := slots[i]
+		if w.caliber != caliber or left <= 0:
+			continue
+		var sp: Array = spare[i]
+		for k in sp.size():
+			var need := w.mag_size - int(sp[k])
+			var put := mini(need, left)
+			sp[k] = int(sp[k]) + put
+			left -= put
+		while left > 0 and sp.size() < w.spare_mags + 2:
+			var put := mini(w.mag_size, left)
+			sp.append(put)
+			left -= put
+		sp.sort()
+		sp.reverse()
+	return count - left
+
+
+func uses_caliber(caliber: String) -> bool:
+	for w in slots:
+		if w.caliber == caliber:
+			return true
+	return false
+
+
+## Replaces the primary with a weapon from the ground. Returns what was dropped.
+func swap_primary(data: WeaponData, in_mag: int, p_spares: Array) -> Dictionary:
+	var old := {"weapon": slots[0], "mag": mag[0], "spares": (spare[0] as Array).duplicate()}
+	slots[0] = data
+	mag[0] = in_mag
+	var s: Array[int] = []
+	for m in p_spares:
+		s.append(int(m))
+	spare[0] = s
+	mode[0] = 0
+	reload_t = 0.0
+	cur = 0
+	pending = -1
+	switch_t = SWITCH_TIME
+	player.viewmodel.show_weapon(data.id)
+	return old
+
+
 func resupply() -> void:
 	for i in slots.size():
 		var s: Array[int] = []

@@ -1,0 +1,31 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/weapon_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "lmg"
+display_name = "LMG-80"
+description = "Belt-fed. Eighty rounds of suppression; slow to reload, slow to aim."
+mag_size = 80
+spare_mags = 1
+rpm = 700.0
+damage = 36.0
+head_mult = 3.0
+hip_spread = 0.05
+ads_spread = 0.004
+kick = 0.012
+kick_yaw = 0.01
+reload_time = 4.6
+reload_empty_time = 5.2
+penetration = 0.7
+effective_range = 60.0
+loudness = 55.0
+suppressed = false
+modes = PackedStringArray("AUTO")
+ads_fov = 52.0
+scoped = false
+tracer_chance = 0.6
+sound = "enemy_lmg"
+caliber = "7.62"
+pellets = 1

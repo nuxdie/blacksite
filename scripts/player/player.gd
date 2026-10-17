@@ -436,8 +436,12 @@ func fire_weapon(w: WeaponData) -> void:
 	cone += supp * 0.012
 	bloom = minf(0.03, bloom + 0.004)
 	var o := eye_pos()
-	var d := Ballistics.spread(aim_dir(), cone)
-	game.player_shot(o, d, w)
+	if w.pellets > 1:
+		var center := Ballistics.spread(aim_dir(), cone * 0.3)
+		for i in w.pellets:
+			game.player_shot(o, Ballistics.spread(center, lerpf(w.hip_spread, w.ads_spread, ads)), w, i == 0)
+	else:
+		game.player_shot(o, Ballistics.spread(aim_dir(), cone), w)
 	var k := w.kick * lerpf(1.0, 0.65, ads) * (0.85 if crouched else 1.0)
 	pitch += k
 	recov += k

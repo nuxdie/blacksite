@@ -151,7 +151,45 @@ func _ready() -> void:
 	_box(pistol, Vector3(0.05, 0.06, 0.06), glove, Vector3(-0.03, -0.1, 0.0), Vector3(0, 0.3, 0))
 	pistol.set_meta("info", {"mag": pmag, "mag_y": pmag.position.y, "muzzle": Vector3(0, -0.022, -0.28), "ads": Vector3(0, 0, -0.3), "hip": Vector3(0.16, -0.14, -0.38)})
 
-	models = {"carbine": carbine, "smg": smg, "dmr": dmr, "pistol": pistol}
+	var wood := _mat("wood", Color("5a3a22"), 0.7)
+	var ar7 := Node3D.new()
+	_box(ar7, Vector3(0.052, 0.075, 0.3), steel, Vector3(0, -0.07, 0.02))
+	_box(ar7, Vector3(0.058, 0.06, 0.22), wood, Vector3(0, -0.066, -0.24))
+	_cyl(ar7, 0.012, 0.22, steel, Vector3(0, -0.058, -0.45))
+	_box(ar7, Vector3(0.008, 0.03, 0.008), steel, Vector3(0, -0.035, -0.53))
+	var amag := _box(ar7, Vector3(0.034, 0.16, 0.06), steel, Vector3(0, -0.17, -0.06), Vector3(0.35, 0, 0))
+	_box(ar7, Vector3(0.032, 0.095, 0.04), wood, Vector3(0, -0.14, 0.1), Vector3(-0.35, 0, 0))
+	_box(ar7, Vector3(0.042, 0.08, 0.24), wood, Vector3(0, -0.085, 0.28))
+	_box(ar7, Vector3(0.016, 0.02, 0.02), steel, Vector3(0, -0.02, 0.06))
+	hands.call(ar7, 0.08, -0.24)
+	ar7.set_meta("info", {"mag": amag, "mag_y": amag.position.y, "muzzle": Vector3(0, -0.058, -0.57), "ads": Vector3(0, 0.03, -0.2), "hip": Vector3(0.19, -0.16, -0.4)})
+
+	var lmg := Node3D.new()
+	_box(lmg, Vector3(0.07, 0.1, 0.36), poly, Vector3(0, -0.08, 0.0))
+	_box(lmg, Vector3(0.075, 0.03, 0.3), steel, Vector3(0, -0.02, -0.02))
+	_cyl(lmg, 0.016, 0.36, steel, Vector3(0, -0.07, -0.42))
+	_cyl(lmg, 0.022, 0.05, steel, Vector3(0, -0.07, -0.62))
+	var lbox := _box(lmg, Vector3(0.06, 0.12, 0.14), od, Vector3(-0.04, -0.17, -0.04))
+	_box(lmg, Vector3(0.035, 0.1, 0.045), poly, Vector3(0, -0.15, 0.12), Vector3(-0.3, 0, 0))
+	_box(lmg, Vector3(0.05, 0.09, 0.24), poly, Vector3(0, -0.09, 0.3))
+	_box(lmg, Vector3(0.012, 0.18, 0.012), steel, Vector3(0.03, -0.16, -0.5), Vector3(0.3, 0, 0.2))
+	_box(lmg, Vector3(0.012, 0.18, 0.012), steel, Vector3(-0.03, -0.16, -0.5), Vector3(0.3, 0, -0.2))
+	reddot.call(lmg, 0.04)
+	hands.call(lmg, 0.1, -0.28)
+	lmg.set_meta("info", {"mag": lbox, "mag_y": lbox.position.y, "muzzle": Vector3(0, -0.07, -0.66), "ads": Vector3(0, 0, -0.21), "hip": Vector3(0.2, -0.18, -0.42)})
+
+	var shotgun := Node3D.new()
+	_box(shotgun, Vector3(0.05, 0.07, 0.24), steel, Vector3(0, -0.068, 0.02))
+	_cyl(shotgun, 0.015, 0.5, steel, Vector3(0, -0.05, -0.33))
+	_cyl(shotgun, 0.013, 0.42, poly, Vector3(0, -0.082, -0.29))
+	var pump := _box(shotgun, Vector3(0.05, 0.05, 0.14), poly, Vector3(0, -0.082, -0.25))
+	_box(shotgun, Vector3(0.032, 0.095, 0.04), poly, Vector3(0, -0.13, 0.1), Vector3(-0.35, 0, 0))
+	_box(shotgun, Vector3(0.042, 0.075, 0.24), poly, Vector3(0, -0.08, 0.27))
+	_box(shotgun, Vector3(0.006, 0.012, 0.006), dot, Vector3(0, -0.032, -0.57))
+	hands.call(shotgun, 0.08, -0.25)
+	shotgun.set_meta("info", {"mag": pump, "mag_y": pump.position.y, "muzzle": Vector3(0, -0.05, -0.6), "ads": Vector3(0, 0.035, -0.25), "hip": Vector3(0.19, -0.16, -0.4)})
+
+	models = {"carbine": carbine, "smg": smg, "dmr": dmr, "pistol": pistol, "ar7": ar7, "lmg": lmg, "shotgun": shotgun}
 	for m: Node3D in models.values():
 		m.visible = false
 		add_child(m)

@@ -63,6 +63,7 @@ var _last_line_t := -9.0
 var _pending_radio: Array[Dictionary] = []
 var _beacon: Node3D
 var _test: TestRunner
+var _shot_hit := false
 
 
 func _ready() -> void:
@@ -402,16 +403,20 @@ func _tick_radio() -> void:
 		var r: Dictionary = _pending_radio[i]
 		if time >= float(r.t):
 			_pending_radio.remove_at(i)
+			if r.has("release"):
+				var sq: Squad = r.release
+				if sq.flanker == r.s:
+					sq.flanker = null
+					sq.flank_cooldown = time + 6.0
+				continue
 			var s: Soldier = r.s
 			if is_instance_valid(s) and s.alive and s.state != Soldier.State.COMBAT:
 				s.alert(s.squad.last_known, "radio")
 
 
+## Lets a squad pick a new flanker a few seconds after this one reaches position.
 func release_flanker_later(sq: Squad, s: Soldier) -> void:
-	get_tree().create_timer(5.0, false).timeout.connect(func() -> void:
-		if sq.flanker == s:
-			sq.flanker = null
-			sq.flank_cooldown = time + 6.0)
+	_pending_radio.append({"release": sq, "s": s, "t": time + 5.0})
 
 
 ## quiet = suppressed: only guards right next to it recognise gunfire; others just hear something.
@@ -449,7 +454,9 @@ func impact_noise(pt: Vector3) -> void:
 
 # ------------------------------------------------------------------ shooting
 
-func player_shot(o: Vector3, d: Vector3, w: WeaponData) -> void:
+func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
+	if first:
+		_shot_hit = false
 	var space := get_world_3d().direct_space_state
 	var res := Ballistics.trace(space, o, d, w.penetration, 300.0,
 		func(oo: Vector3, dd: Vector3, max_t: float) -> Dictionary:
@@ -482,7 +489,7 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData) -> void:
 				impact_noise(pt))
 	var end: Vector3 = res.end
 	var end_t := o.distance_to(end)
-	if randf() < w.tracer_chance:
+	if first and randf() < w.tracer_chance:
 		fx.tracer(o + d * 1.2 + player.right() * 0.08 + Vector3.DOWN * 0.08, end)
 	var tgt: Dictionary = res.get("target", {})
 	# near misses pin guards down
@@ -504,7 +511,9 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData) -> void:
 	if tgt.has("lamp"):
 		_break_lamp(tgt.lamp)
 		return
-	stats.hits += 1
+	if not _shot_hit:
+		stats.hits += 1
+		_shot_hit = true
 	var s: Soldier = tgt.soldier
 	var zone: String = tgt.zone
 	var mul := w.head_mult * s.profile.helmet if zone == "head" else (0.7 if zone == "legs" else 1.0)
@@ -782,6 +791,12 @@ func interact() -> void:
 			hud.toast("RESUPPLIED")
 		Pickup.Kind.INTEL:
 			_take_intel()
+		Pickup.Kind.WEAPON:
+			var old := player.weapons.swap_primary(p.weapon, p.mag_rounds, p.spares)
+			var drop := player.global_position + player.forward() * 0.4
+			facility.place(Pickup.dropped_weapon(drop, old.weapon, old.mag, old.spares))
+			hud.toast(p.weapon.display_name + "  ·  " + p.weapon.caliber)
+			hud.hint_event("scavenge")
 	p.take()
 
 
@@ -791,14 +806,15 @@ func _tick_pickups() -> void:
 	for p in facility.pickups:
 		if p.taken or not p.is_auto() or p.global_position.distance_to(player.global_position) > 1.3:
 			continue
-		if p.kind == Pickup.Kind.MAG:
-			var got := 0
-			for _i in p.amount:
-				if player.weapons.add_mag(0, player.weapons.slots[0].mag_size):
-					got += 1
-			if got == 0:
+		if p.kind == Pickup.Kind.ROUNDS:
+			var used := player.weapons.take_rounds(p.caliber, p.amount)
+			if used == 0:
 				continue
-			hud.toast("+%d MAGAZINE%s" % [got, "S" if got > 1 else ""])
+			p.amount -= used
+			hud.toast("+%d  %s" % [used, p.caliber])
+			Sfx.play("pickup")
+			if p.amount > 0:
+				continue
 		else:
 			var g: Dictionary = {}
 			for x in player.weapons.gadgets:
@@ -809,6 +825,14 @@ func _tick_pickups() -> void:
 			g.n = int(g.n) + 1
 			hud.toast("+1 FRAG")
 		p.take()
+
+
+## Loose rounds at your feet that none of your weapons take.
+func useless_rounds_near() -> Pickup:
+	for p in facility.pickups:
+		if not p.taken and p.kind == Pickup.Kind.ROUNDS and p.global_position.distance_to(player.global_position) < 1.6 and not player.weapons.uses_caliber(p.caliber):
+			return p
+	return null
 
 
 func mark_target() -> void:
@@ -845,7 +869,11 @@ func on_soldier_killed(s: Soldier, headshot: bool, takedown: bool) -> void:
 	if takedown:
 		stats.takedowns += 1
 	Sfx.play_at("body", s.global_position + Vector3.UP * 0.3)
-	facility.add_pickup(Pickup.Kind.MAG, s.global_position, 2 if s.profile.id == "heavy" else 1, false)
+	# they drop what they were actually carrying: their weapon, and loose rounds for it
+	var data: WeaponData = load("res://resources/weapons/%s.tres" % s.profile.weapon_id)
+	var side := Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5))
+	facility.place(Pickup.dropped_weapon(s.global_position + side, data, clampi(s.mag, 0, data.mag_size), []))
+	facility.place(Pickup.rounds(s.global_position - side * 0.6, data.caliber, s.profile.carried_rounds))
 	if s.grenades > 0 and randf() < 0.6:
 		facility.add_pickup(Pickup.Kind.FRAG, s.global_position + Vector3(0.3, 0, 0.2), 1, false)
 	if not takedown:

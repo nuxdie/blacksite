@@ -27,3 +27,4 @@ ads_fov = 48.0
 scoped = false
 tracer_chance = 0.35
 sound = "rifle"
+caliber = "5.56"

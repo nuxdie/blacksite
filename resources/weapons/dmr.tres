@@ -27,3 +27,4 @@ ads_fov = 18.0
 scoped = true
 tracer_chance = 0.5
 sound = "dmr"
+caliber = "7.62"
