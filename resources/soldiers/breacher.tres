@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="SoldierProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ai/soldier_profile.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "breacher"
+display_name = "BREACHER"
+health = 110.0
+run_speed = 5.4
+walk_speed = 1.8
+mag_size = 6
+fire_interval = 0.9
+burst_min = 1
+burst_max = 1
+pause_min = 0.9
+pause_max = 1.1
+damage = 9.0
+spread_mult = 1.0
+penetration = 0.05
+helmet = 1.0
+armor = 1.0
+preferred_range = 6.0
+grenades = 0
+weapon_kind = "shotgun"
+visor_color = Color(0.251, 0.816, 1, 1)
+uniform_color = Color(0.227, 0.204, 0.188, 1)
+doctrine = "rush"

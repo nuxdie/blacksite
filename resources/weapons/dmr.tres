@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/weapon_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "dmr"
+display_name = "M21 MARKSMAN"
+description = "Semi-auto 7.62 with a 4x scope. A headshot drops almost anyone; goes through most walls. Very loud."
+mag_size = 10
+spare_mags = 4
+rpm = 220.0
+damage = 80.0
+head_mult = 3.5
+hip_spread = 0.07
+ads_spread = 0.0002
+kick = 0.045
+kick_yaw = 0.01
+reload_time = 2.6
+reload_empty_time = 3.1
+penetration = 1.0
+effective_range = 150.0
+loudness = 55.0
+suppressed = false
+modes = PackedStringArray("SEMI")
+ads_fov = 18.0
+scoped = true
+tracer_chance = 0.5
+sound = "dmr"

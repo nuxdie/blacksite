@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/weapon_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "smg"
+display_name = "K7 SD"
+description = "Integrally suppressed. Only heard up close. Precise near, weak at range and against cover."
+mag_size = 30
+spare_mags = 4
+rpm = 880.0
+damage = 23.0
+head_mult = 4.5
+hip_spread = 0.02
+ads_spread = 0.003
+kick = 0.007
+kick_yaw = 0.006
+reload_time = 2.0
+reload_empty_time = 2.4
+penetration = 0.25
+effective_range = 22.0
+loudness = 9.0
+suppressed = true
+modes = PackedStringArray("AUTO", "SEMI")
+ads_fov = 56.0
+scoped = false
+tracer_chance = 0.0
+sound = "sd_smg"

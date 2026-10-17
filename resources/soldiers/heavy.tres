@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="SoldierProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ai/soldier_profile.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "heavy"
+display_name = "HEAVY"
+health = 230.0
+run_speed = 2.7
+walk_speed = 1.5
+mag_size = 80
+fire_interval = 0.085
+burst_min = 8
+burst_max = 14
+pause_min = 0.6
+pause_max = 1.1
+damage = 10.0
+spread_mult = 1.6
+penetration = 0.7
+helmet = 0.6
+armor = 0.6
+preferred_range = 14.0
+grenades = 0
+weapon_kind = "lmg"
+visor_color = Color(1, 0.627, 0.125, 1)
+uniform_color = Color(0.165, 0.173, 0.188, 1)
+doctrine = "advance"

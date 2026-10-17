@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/weapon_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "carbine"
+display_name = "MK4 CARBINE"
+description = "Full-auto 5.56. Reliable at any range and punches through thin walls. Loud."
+mag_size = 30
+spare_mags = 4
+rpm = 660.0
+damage = 34.0
+head_mult = 3.5
+hip_spread = 0.03
+ads_spread = 0.0012
+kick = 0.0135
+kick_yaw = 0.005
+reload_time = 2.3
+reload_empty_time = 2.75
+penetration = 0.55
+effective_range = 60.0
+loudness = 45.0
+suppressed = false
+modes = PackedStringArray("AUTO", "SEMI")
+ads_fov = 48.0
+scoped = false
+tracer_chance = 0.35
+sound = "rifle"

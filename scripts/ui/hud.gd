@@ -1,0 +1,460 @@
+class_name Hud
+extends CanvasLayer
+## Minimal in-game interface. Everything is drawn on one overlay: compass, sights, awareness and
+## damage cues, vitals, ammunition, contextual key prompts, one-time tips and radio subtitles.
+
+var game: Game
+var flash := 0.0
+var hints := Hints.new()
+
+var _fx: ColorRect
+var _fx_mat: ShaderMaterial
+var _flash_rect: ColorRect
+var _overlay: Control
+var _damage := 0.0
+var _hit_t := 0.0
+var _hit_kill := false
+var _dmg_dirs: Array[Dictionary] = []
+var _subs: Array[Dictionary] = []
+var _toast := ""
+var _toast_t := 0.0
+var _banner := ""
+var _banner_t := 0.0
+
+var _f_small: FontVariation
+var _f_label: FontVariation
+var _f_wide: FontVariation
+var _f_big: Font
+var _f_num: Font
+
+
+func _ready() -> void:
+	layer = 1
+	hints.game = game
+	_f_small = Style.spaced(Style.semibold, 2)
+	_f_label = Style.spaced(Style.semibold, 3)
+	_f_wide = Style.spaced(Style.bold, 10)
+	_f_big = Style.bold
+	_f_num = Style.bold
+	_fx = ColorRect.new()
+	_fx.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fx_mat = ShaderMaterial.new()
+	_fx_mat.shader = preload("res://shaders/screen_fx.gdshader")
+	_fx.material = _fx_mat
+	add_child(_fx)
+	_flash_rect = ColorRect.new()
+	_flash_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_flash_rect.color = Color(1, 1, 1, 0)
+	add_child(_flash_rect)
+	_overlay = Control.new()
+	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_overlay.draw.connect(_draw_overlay)
+	add_child(_overlay)
+	visible = false
+
+
+func reset() -> void:
+	flash = 0.0
+	_damage = 0.0
+	_dmg_dirs.clear()
+	_subs.clear()
+	_toast_t = 0.0
+	_banner_t = 0.0
+	hints.current = {}
+
+
+# ------------------------------------------------------------------ events
+
+func learn(id: String) -> void:
+	hints.learn(id)
+
+
+func hint_event(name: String) -> void:
+	hints.event(name)
+
+
+func toast(text: String) -> void:
+	_toast = text
+	_toast_t = 1.6
+
+
+func banner(text: String) -> void:
+	_banner = text
+	_banner_t = 3.0
+
+
+func subtitle(who: String, text: String) -> void:
+	_subs.append({"who": who, "text": text, "t": 2.8})
+	if _subs.size() > 3:
+		_subs.pop_front()
+
+
+func hitmarker(kill: bool) -> void:
+	_hit_t = 0.35 if kill else 0.15
+	_hit_kill = kill
+	if kill:
+		Sfx.play("kill", -6.0)
+
+
+func on_damage(amount: float, from: Vector3) -> void:
+	_damage = minf(1.0, _damage + amount / 25.0)
+	_dmg_dirs.append({"pos": from, "t": 1.6})
+
+
+func refresh(dt: float) -> void:
+	var p := game.player
+	_damage = maxf(0.0, _damage - dt * 1.2)
+	flash = maxf(0.0, flash - dt * 0.45)
+	_hit_t = maxf(0.0, _hit_t - dt)
+	_toast_t = maxf(0.0, _toast_t - dt)
+	_banner_t = maxf(0.0, _banner_t - dt)
+	for i in range(_subs.size() - 1, -1, -1):
+		_subs[i].t = float(_subs[i].t) - dt
+		if float(_subs[i].t) <= 0.0:
+			_subs.remove_at(i)
+	for i in range(_dmg_dirs.size() - 1, -1, -1):
+		_dmg_dirs[i].t = float(_dmg_dirs[i].t) - dt
+		if float(_dmg_dirs[i].t) <= 0.0:
+			_dmg_dirs.remove_at(i)
+	hints.update(dt)
+	_fx_mat.set_shader_parameter("suppression", p.supp)
+	_fx_mat.set_shader_parameter("damage", _damage)
+	_fx_mat.set_shader_parameter("low_health", clampf((30.0 - p.hp) / 30.0, 0.0, 1.0) * 0.6 if p.alive else 0.0)
+	_flash_rect.color.a = minf(1.0, flash)
+	_overlay.queue_redraw()
+
+
+# ------------------------------------------------------------------ drawing helpers
+
+func _text(pos: Vector2, text: String, size: int, color: Color, align := HORIZONTAL_ALIGNMENT_LEFT, font: Font = null) -> float:
+	var f := font if font else _f_label
+	var w := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var x := pos.x
+	if align == HORIZONTAL_ALIGNMENT_CENTER:
+		x -= w * 0.5
+	elif align == HORIZONTAL_ALIGNMENT_RIGHT:
+		x -= w
+	var shadow := Color(0, 0, 0, color.a * 0.6)
+	_overlay.draw_string(f, Vector2(x + 1, pos.y + 1), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, shadow)
+	_overlay.draw_string(f, Vector2(x, pos.y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+	return w
+
+
+func _keycap_width(glyph: String) -> float:
+	return maxf(24.0, _f_small.get_string_size(glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x + 14.0)
+
+
+func _keycap(pos: Vector2, glyph: String, alpha := 1.0) -> float:
+	var w := _keycap_width(glyph)
+	var r := Rect2(pos.x, pos.y - 17, w, 23)
+	_overlay.draw_rect(r, Color(0, 0, 0, 0.35 * alpha))
+	_overlay.draw_rect(r, Color(Style.INK, 0.85 * alpha), false, 1.5)
+	_text(Vector2(pos.x + w * 0.5, pos.y), glyph, 14, Color(Style.INK, alpha), HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+	return w
+
+
+## A row of key caps followed by a label; returns its width. dry=true measures only.
+func _prompt_row(pos: Vector2, keys: Array, label: String, alpha: float, dry := false) -> float:
+	var x := pos.x
+	for k: String in keys:
+		var g := Settings.glyph(k)
+		if dry:
+			x += _keycap_width(g) + 5
+		else:
+			x += _keycap(Vector2(x, pos.y), g, alpha) + 5
+	x += 6
+	var lw := _f_label.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	if not dry:
+		_text(Vector2(x, pos.y), label, 16, Color(Style.INK, alpha))
+	return x + lw - pos.x
+
+
+func _screen_angle(world: Vector3) -> float:
+	var cam := game.player.camera
+	var local := cam.global_transform.affine_inverse() * world
+	return atan2(local.x, -local.z) - PI / 2.0
+
+
+# ------------------------------------------------------------------ the overlay
+
+func _draw_overlay() -> void:
+	var p := game.player
+	var size := _overlay.size
+	var c := size * 0.5
+	if p.is_scoped():
+		_draw_scope(size, c)
+	_draw_compass(size)
+	_draw_markers()
+	if p.alive:
+		_draw_sights(c)
+	_draw_arcs(c)
+	_draw_vitals(size)
+	_draw_ammo(size)
+	_draw_prompts(size)
+	_draw_hint(size)
+	for i in _subs.size():
+		var s: Dictionary = _subs[i]
+		var a := clampf(float(s.t) / 0.4, 0.0, 1.0)
+		var y := size.y - 120.0 - (_subs.size() - 1 - i) * 26.0
+		var who: String = s.who
+		var line: String = s.text
+		var ww := _f_small.get_string_size(who, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		var lw := Style.semibold.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 19).x
+		var x := c.x - (ww + 10 + lw) * 0.5
+		_text(Vector2(x, y), who, 13, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+		_text(Vector2(x + ww + 10, y), line, 19, Color(Style.INK, a), HORIZONTAL_ALIGNMENT_LEFT, Style.semibold)
+	if _toast_t > 0.0:
+		_text(Vector2(c.x, size.y * 0.4), _toast, 15, Color(Style.DIM, minf(1.0, _toast_t * 3.0)), HORIZONTAL_ALIGNMENT_CENTER)
+	if _banner_t > 0.0:
+		_text(Vector2(c.x, size.y * 0.3), _banner, 30, Color(Style.INK, minf(1.0, _banner_t * 2.0)), HORIZONTAL_ALIGNMENT_CENTER, _f_wide)
+
+
+func _draw_compass(size: Vector2) -> void:
+	var p := game.player
+	var heading := atan2(-sin(p.yaw), -cos(p.yaw))
+	var cw := 420.0
+	var cx := size.x * 0.5
+	var y := 30.0
+	var span := PI * 0.75
+	for deg in range(0, 360, 15):
+		var rel := angle_difference(heading, deg_to_rad(deg))
+		if absf(rel) > span / 2.0:
+			continue
+		var x := cx + rel / (span / 2.0) * cw / 2.0
+		var a := 1.0 - absf(rel) / (span / 2.0) * 0.85
+		var card := deg % 90 == 0
+		_overlay.draw_line(Vector2(x, y - (7.0 if card else 4.0)), Vector2(x, y + 2), Color(Style.INK, a * 0.8), 1.0)
+		if card:
+			_text(Vector2(x, y + 19), "NESW"[deg / 90], 14, Color(Style.INK, a), HORIZONTAL_ALIGNMENT_CENTER)
+		elif deg % 45 == 0:
+			_text(Vector2(x, y + 17), str(deg), 11, Color(Style.DIM, a), HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+	_overlay.draw_line(Vector2(cx, y - 18), Vector2(cx, y - 10), Style.INK, 2.0)
+	var tgt := game.objective_target()
+	var orel := angle_difference(heading, atan2(tgt.x - p.global_position.x, tgt.z - p.global_position.z))
+	var ox := cx + clampf(orel / (span / 2.0), -1.0, 1.0) * cw / 2.0
+	_overlay.draw_colored_polygon(PackedVector2Array([Vector2(ox, y - 13), Vector2(ox + 6, y - 7), Vector2(ox, y - 1), Vector2(ox - 6, y - 7)]), Style.AMBER)
+	var dist := Vector2(tgt.x - p.global_position.x, tgt.z - p.global_position.z).length()
+	var label := game.objective_text()
+	var lw := _f_label.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	var dtxt := "  %dm" % roundi(dist)
+	var dw := _f_label.get_string_size(dtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	_text(Vector2(cx - (lw + dw) * 0.5, y + 44), label, 14, Style.INK)
+	_text(Vector2(cx - (lw + dw) * 0.5 + lw, y + 44), dtxt, 14, Style.AMBER)
+
+
+func _draw_markers() -> void:
+	var cam := game.player.camera
+	for s in game.soldiers:
+		if not s.alive or not s.tagged:
+			continue
+		var wp := s.global_position + Vector3.UP * 2.05
+		if cam.is_position_behind(wp):
+			continue
+		var sp := cam.unproject_position(wp)
+		var col := Style.RED if s.state == Soldier.State.COMBAT else (Style.AMBER if s.state == Soldier.State.SUSPICIOUS else Style.INK)
+		_overlay.draw_colored_polygon(PackedVector2Array([sp + Vector2(0, -6), sp + Vector2(5, 0), sp + Vector2(0, 6), sp + Vector2(-5, 0)]), col)
+		_text(sp + Vector2(0, -10), "%dm" % roundi(s.global_position.distance_to(game.player.global_position)), 11, Color(col, 0.85), HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+
+
+func _draw_sights(c: Vector2) -> void:
+	var p := game.player
+	var w := p.weapons
+	var hidden := p.ads > 0.5 or p.sprinting or w.aiming_throw or w.reload_t > 0.0 or p.drag_body != null or p.vault_t >= 0.0
+	if not hidden:
+		var cur := w.current()
+		var spread := cur.hip_spread + clampf(p.speed_2d() / Player.WALK, 0.0, 1.5) * 0.03 + p.bloom + (0.0 if p.is_on_floor() else 0.06)
+		var gap := 4.0 + spread * _overlay.size.y / (2.0 * tan(deg_to_rad(p.camera.fov / 2.0)))
+		var col := Color(1, 1, 1, 0.85)
+		for d: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
+			_overlay.draw_line(c + d * gap, c + d * (gap + 8.0), col, 2.0)
+		_overlay.draw_rect(Rect2(c - Vector2(1, 1), Vector2(2, 2)), col)
+	if _hit_t > 0.0:
+		var col2 := Style.RED if _hit_kill else Color.WHITE
+		for d: Vector2 in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
+			_overlay.draw_line(c + d.normalized() * 6.0, c + d.normalized() * 13.0, col2, 3.0 if _hit_kill else 2.0)
+
+
+func _draw_arcs(c: Vector2) -> void:
+	for d: Dictionary in _dmg_dirs:
+		var a := _screen_angle(d.pos)
+		_overlay.draw_arc(c, 130.0, a - 0.22, a + 0.22, 18, Color(1, 0.24, 0.16, minf(0.9, float(d.t))), 5.0)
+	for s in game.soldiers:
+		if not s.alive:
+			continue
+		var col: Color
+		var amt := 1.0
+		if s.state == Soldier.State.COMBAT:
+			if not s.sees:
+				continue
+			col = Style.RED
+		elif s.aware > 0.03:
+			amt = minf(1.0, s.aware)
+			col = Style.AMBER if s.state == Soldier.State.SUSPICIOUS else Style.INK
+		else:
+			continue
+		var a := _screen_angle(s.global_position + Vector3.UP * 1.5)
+		_overlay.draw_arc(c, 100.0, a - 0.16, a + 0.16, 12, Color(col, 0.18), 4.0)
+		_overlay.draw_arc(c, 100.0, a - 0.16 * amt, a + 0.16 * amt, 12, Color(col, 0.95), 4.0)
+	for g in game.gadgets:
+		if g.type != "frag" or g.global_position.distance_to(game.player.global_position) > 11.0:
+			continue
+		var a := _screen_angle(g.global_position)
+		var pos := c + Vector2(cos(a), sin(a)) * 165.0
+		var blink := 1.0 if fmod(game.time * 10.0, 2.0) < 1.0 else 0.4
+		_overlay.draw_circle(pos, 9.0, Color(Style.RED if not g.owner_is_player else Style.AMBER, blink))
+		_text(pos + Vector2(0, 5), "!", 13, Color.BLACK, HORIZONTAL_ALIGNMENT_CENTER, Style.bold)
+
+
+func _draw_vitals(size: Vector2) -> void:
+	var p := game.player
+	var x := 34.0
+	var y := size.y - 34.0
+	var low := p.hp < 30.0
+	var col := Style.RED if low else Style.INK
+	_text(Vector2(x, y - 26), str(ceili(p.hp)), 34, col, HORIZONTAL_ALIGNMENT_LEFT, _f_num)
+	for i in 4:
+		var r := Rect2(x + i * 56.0, y - 14, 52, 5)
+		_overlay.draw_rect(r, Style.FAINT)
+		var fill := clampf((p.hp - i * 25.0) / 25.0, 0.0, 1.0)
+		if fill > 0.0:
+			_overlay.draw_rect(Rect2(r.position, Vector2(r.size.x * fill, r.size.y)), col)
+	var stance := "DRAGGING" if p.drag_body else ("CROUCHED" if p.crouched else "STANDING")
+	if absf(p.lean_k) > 0.5:
+		stance += "  ·  LEAN " + ("L" if p.lean_k < 0.0 else "R")
+	_text(Vector2(x, y + 6), stance, 13, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+
+
+func _draw_ammo(size: Vector2) -> void:
+	var w := game.player.weapons
+	var cur := w.current()
+	var x := size.x - 34.0
+	var y := size.y - 34.0
+	var m: int = w.mag[w.cur]
+	var col := Style.RED if m == 0 else (Style.AMBER if m <= cur.mag_size * 0.25 else Style.INK)
+	_text(Vector2(x, y - 26), "—" if w.reload_t > 0.0 else str(m), 42, col, HORIZONTAL_ALIGNMENT_RIGHT, _f_num)
+	var sp: Array = w.spares()
+	var px := x
+	for i in range(sp.size() - 1, -1, -1):
+		px -= 9.0
+		var r := Rect2(px, y - 18, 6, 14)
+		_overlay.draw_rect(r, Color(Style.INK, 0.5), false, 1.0)
+		var fill := float(sp[i]) / cur.mag_size
+		_overlay.draw_rect(Rect2(r.position.x, r.end.y - r.size.y * fill, r.size.x, r.size.y * fill), Style.INK)
+	if sp.is_empty():
+		_text(Vector2(x, y - 6), "NO SPARE MAGAZINES", 12, Style.RED, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+	var line := cur.display_name
+	if cur.modes.size() > 1:
+		line += "  ·  " + w.fire_mode()
+	if cur.suppressed:
+		line += "  ·  SUPPRESSED"
+	_text(Vector2(x, y + 6), line, 13, Style.DIM, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+	var gx := x
+	for i in range(w.gadgets.size() - 1, -1, -1):
+		var g: Dictionary = w.gadgets[i]
+		var t := "%s %d" % [Gadget.INFO[g.type].name, int(g.n)]
+		var sel := i == w.gsel
+		gx -= _text(Vector2(gx, y + 24), t, 13, Style.INK if sel else Style.DIM, HORIZONTAL_ALIGNMENT_RIGHT, _f_small) + 16.0
+
+
+## Context: only what you can do right now.
+func _prompts() -> Array:
+	var p := game.player
+	var w := p.weapons
+	var out := []
+	if not p.alive:
+		return out
+	if w.aiming_throw:
+		out.append([["gadget"], "Release to throw  ·  aim the arc"])
+		out.append([["aim"], "Cancel"])
+		return out
+	if p.drag_body:
+		out.append([["interact"], "Release to drop"])
+		return out
+	var t := game.takedown_target()
+	if t:
+		out.append([["interact"], "Takedown"])
+	else:
+		var it := game.interact_target()
+		if it:
+			out.append([["interact"], it.label()])
+		elif game.corpse_near():
+			out.append([["interact"], "Hold to drag body"])
+	if p.vault_ok:
+		out.append([["jump"], "Vault"])
+	if p.crouched and p.low_cover_ahead and p.ads < 0.3:
+		out.append([["aim"], "Aim over cover"])
+	if p.is_scoped():
+		out.append([["sprint"], "Hold breath"])
+	var cur := w.current()
+	var sp: Array = w.spares()
+	if w.reload_t <= 0.0 and w.mag[w.cur] <= cur.mag_size * 0.25 and not sp.is_empty() and int(sp.max()) > w.mag[w.cur]:
+		out.append([["reload"], "Reload"])
+	if w.cur == 0 and w.mag[0] == 0 and sp.is_empty():
+		out.append([["sidearm"], "Sidearm"])
+	return out.slice(0, 3)
+
+
+func _draw_prompts(size: Vector2) -> void:
+	var rows := _prompts()
+	var y := size.y * 0.64
+	for r: Array in rows:
+		var wdt := _prompt_row(Vector2.ZERO, r[0], r[1], 1.0, true)
+		_prompt_row(Vector2(size.x * 0.5 - wdt * 0.5, y), r[0], r[1], 1.0)
+		y += 32.0
+
+
+func _draw_hint(size: Vector2) -> void:
+	var h := hints.current
+	if h.is_empty() and hints.alpha <= 0.01:
+		return
+	if h.is_empty():
+		return
+	var a := hints.alpha
+	var x := 34.0
+	var y := size.y * 0.44
+	var keys: Array = h.keys
+	var wdt := _prompt_row(Vector2.ZERO, keys, h.text, a, true) if not keys.is_empty() else _f_label.get_string_size(h.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	var r := Rect2(x - 12, y - 28, wdt + 24, 40)
+	_overlay.draw_rect(r, Color(0.02, 0.03, 0.05, 0.55 * a))
+	_overlay.draw_rect(Rect2(r.position, Vector2(2, r.size.y)), Color(Style.AMBER, a))
+	if keys.is_empty():
+		_text(Vector2(x, y), h.text, 16, Color(Style.INK, a))
+	else:
+		_prompt_row(Vector2(x, y), keys, h.text, a)
+
+
+func _draw_scope(size: Vector2, c: Vector2) -> void:
+	var r := size.y * 0.44
+	var black := Color(0, 0, 0, 1)
+	_overlay.draw_rect(Rect2(0, 0, c.x - r + 1, size.y), black)
+	_overlay.draw_rect(Rect2(c.x + r - 1, 0, size.x - (c.x + r) + 1, size.y), black)
+	for i in 64:
+		var a0 := TAU * i / 64.0
+		var a1 := TAU * (i + 1) / 64.0
+		var top := Vector2(c.x + cos(a0) * r, c.y + sin(a0) * r)
+		var top2 := Vector2(c.x + cos(a1) * r, c.y + sin(a1) * r)
+		var edge_y := 0.0 if sin(a0) < 0.0 else size.y
+		_overlay.draw_colored_polygon(PackedVector2Array([top, top2, Vector2(top2.x, edge_y), Vector2(top.x, edge_y)]), black)
+	_overlay.draw_arc(c, r - 10, 0, TAU, 96, Color(0, 0, 0, 0.6), 22.0)
+	var dark := Color(0, 0, 0, 0.92)
+	_overlay.draw_rect(Rect2(c.x - r, c.y - 2, r * 0.72, 4), dark)
+	_overlay.draw_rect(Rect2(c.x + r * 0.28, c.y - 2, r * 0.72, 4), dark)
+	_overlay.draw_rect(Rect2(c.x - 2, c.y + r * 0.28, 4, r * 0.72), dark)
+	_overlay.draw_rect(Rect2(c.x - 2, c.y - r, 4, r * 0.72), dark)
+	_overlay.draw_line(Vector2(c.x - r * 0.28, c.y), Vector2(c.x - 5, c.y), dark, 1.0)
+	_overlay.draw_line(Vector2(c.x + 5, c.y), Vector2(c.x + r * 0.28, c.y), dark, 1.0)
+	_overlay.draw_line(Vector2(c.x, c.y + 5), Vector2(c.x, c.y + r * 0.28), dark, 1.0)
+	_overlay.draw_line(Vector2(c.x, c.y - r * 0.28), Vector2(c.x, c.y - 5), dark, 1.0)
+	for i in range(1, 4):
+		for s: float in [-1.0, 1.0]:
+			_overlay.draw_circle(c + Vector2(s * i * r * 0.08, 0), 2.0, dark)
+			_overlay.draw_circle(c + Vector2(0, s * i * r * 0.08), 2.0, dark)
+	_overlay.draw_circle(c, 1.6, Color(1, 0.16, 0.08, 0.9))
+	var p := game.player
+	var bw := 180.0
+	var by := size.y * 0.91
+	_overlay.draw_rect(Rect2(c.x - bw / 2, by, bw, 3), Color(1, 1, 1, 0.15))
+	_overlay.draw_rect(Rect2(c.x - bw / 2, by, bw * p.breath / Player.BREATH, 3), Style.RED if p.breath_out > 0.0 else Style.INK)

@@ -1,0 +1,856 @@
+class_name Game
+extends Node3D
+## Mission flow and shared services: owns the world, the player, the guards, equipment in flight,
+## and the rules for noise, sight and damage between them.
+
+enum Phase { LOADING, MENU, PLAY, PAUSED, DEAD, DONE }
+
+const SOLDIER_SCENE := preload("res://scenes/soldier.tscn")
+const PLAYER_SCENE := preload("res://scenes/player.tscn")
+
+const ROSTER := [
+	{"squad": "yard", "type": "rifleman", "pos": Vector3(-22, 0, -14), "patrol": [[-22, -14], [-9, -1], [2, -12], [-12, -14]]},
+	{"squad": "yard", "type": "rifleman", "pos": Vector3(-10, 0, -5), "yaw": 0.0},
+	{"squad": "yard", "type": "rifleman", "pos": Vector3(-14, 3.7, 14), "yaw": 0.0},
+	{"squad": "yard", "type": "rifleman", "pos": Vector3(-12.5, 0, -17.5), "yaw": 0.45},
+	{"squad": "office", "type": "breacher", "pos": Vector3(-27, 0, 21.2), "patrol": [[-27, 21.2], [-3, 21.2]]},
+	{"squad": "office", "type": "rifleman", "pos": Vector3(-15, 0, 27.5), "yaw": 0.0},
+	{"squad": "office", "type": "rifleman", "pos": Vector3(-22, 0, 15), "yaw": -PI / 2},
+	{"squad": "office", "type": "rifleman", "pos": Vector3(5, 0, 26), "patrol": [[5, 26], [5, 14], [-4, 8]]},
+	{"squad": "wh", "type": "rifleman", "pos": Vector3(14, 0, -15), "patrol": [[14, -15], [36, -17], [36, 18], [16, 18]]},
+	{"squad": "wh", "type": "rifleman", "pos": Vector3(14, 0, 4), "yaw": -PI / 2},
+	{"squad": "wh", "type": "breacher", "pos": Vector3(26, 0, -9), "yaw": -PI / 2},
+	{"squad": "wh", "type": "heavy", "pos": Vector3(28, 4.2, 26), "yaw": 0.0},
+	{"squad": "wh", "type": "rifleman", "pos": Vector3(44, 4.2, 2), "yaw": -PI / 2},
+	{"squad": "wh", "type": "rifleman", "pos": Vector3(42.5, 4.2, 27), "yaw": 0.0},
+]
+const REINFORCEMENTS := [
+	{"squad": "qrf", "type": "heavy", "pos": Vector3(6, 0, 33)},
+	{"squad": "qrf", "type": "rifleman", "pos": Vector3(4, 0, 34)},
+	{"squad": "qrf", "type": "breacher", "pos": Vector3(8, 0, 34)},
+	{"squad": "qrf", "type": "rifleman", "pos": Vector3(42, 0, -32)},
+	{"squad": "qrf", "type": "rifleman", "pos": Vector3(-2, 0, -33)},
+]
+const LINES := {
+	"contact": ["Contact!", "Got eyes on him!", "There he is!"], "heard": ["Shots fired!", "Gunfire — stay sharp!"],
+	"radio": ["Copy, moving!", "On my way!"], "flank": ["Flanking!", "Moving to flank!", "I'm going around!"],
+	"reload": ["Reloading!", "Changing mag!"], "nade": ["Frag out!", "Grenade out!"], "nade_warn": ["Grenade!", "Get clear!"],
+	"mandown": ["Man down!", "We lost one!"], "lost": ["Lost visual.", "Where'd he go?"], "search": ["Moving up.", "I'll check it."],
+	"hit": ["I'm hit!", "Taking fire!"], "supp": ["Suppressing!", "Keep his head down!"], "huh": ["Huh?", "Hold on...", "What was that?"],
+	"calm": ["Must be nothing.", "...Nothing."], "push": ["Pushing!", "Moving in!"], "body": ["Body here!", "Someone's down!"],
+	"blind": ["I can't see!", "Flash — I'm blind!"], "lights": ["Lights just went out...", "Who killed the lights?"],
+	"noise": ["Hear that?", "Something over there..."], "smoke": ["Smoke! Watch the smoke!", "He's in the smoke!"],
+}
+
+var phase := Phase.LOADING
+var facility: Facility
+var fx: Fx
+var player: Player
+var hud: Hud
+var menu: Menu
+var soldiers: Array[Soldier] = []
+var squads: Dictionary = {}
+var gadgets: Array[Gadget] = []
+var time := 0.0
+var mission := "infil"
+var detected := false
+var reinforce_t := -1.0
+var player_light := 1.0
+var god_mode := false
+var stats := {}
+var _light_t := 0.0
+var _last_line_t := -9.0
+var _pending_radio: Array[Dictionary] = []
+var _beacon: Node3D
+var _test: TestRunner
+
+
+func _ready() -> void:
+	facility = Facility.new()
+	add_child(facility)
+	facility.build()
+	fx = Fx.new()
+	add_child(fx)
+	player = PLAYER_SCENE.instantiate()
+	player.game = self
+	add_child(player)
+	_build_beacon()
+	hud = Hud.new()
+	hud.game = self
+	add_child(hud)
+	menu = Menu.new()
+	menu.game = self
+	add_child(menu)
+	player.spawn(facility.player_start)
+	player.active = false
+	facility.nav_ready.connect(_on_nav_ready)
+	facility.bake_navigation.call_deferred()
+	menu.show_loading()
+	if OS.get_cmdline_user_args().size() > 0:
+		_test = TestRunner.new()
+		_test.game = self
+		add_child(_test)
+
+
+func _on_nav_ready() -> void:
+	phase = Phase.MENU
+	menu.show_title()
+	if _test:
+		_test.start()
+
+
+func _build_beacon() -> void:
+	_beacon = Node3D.new()
+	_beacon.position = facility.extraction
+	var flare := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.04
+	cm.bottom_radius = 0.04
+	cm.height = 0.3
+	flare.mesh = cm
+	flare.material_override = Mats.emissive(Color("40ff60"), 6.0)
+	flare.position.y = 0.15
+	_beacon.add_child(flare)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 3.75
+	tm.outer_radius = 3.9
+	tm.rings = 64
+	ring.mesh = tm
+	var rm := Mats.emissive(Color("40ff60"), 1.5)
+	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rm.albedo_color = Color(0, 0, 0, 0.5)
+	ring.material_override = rm
+	ring.scale = Vector3(1, 0.05, 1)
+	ring.position.y = 0.03
+	_beacon.add_child(ring)
+	var light := OmniLight3D.new()
+	light.light_color = Color("40ff60")
+	light.light_energy = 1.5
+	light.omni_range = 12.0
+	light.position.y = 0.6
+	_beacon.add_child(light)
+	_beacon.visible = false
+	add_child(_beacon)
+
+
+# ------------------------------------------------------------------ flow
+
+func start_mission() -> void:
+	for s in soldiers:
+		s.queue_free()
+	soldiers.clear()
+	squads.clear()
+	for g in gadgets:
+		g.queue_free()
+	gadgets.clear()
+	_pending_radio.clear()
+	facility.reset_props()
+	fx.clear()
+	for r: Dictionary in ROSTER:
+		_spawn(r)
+	time = 0.0
+	mission = "infil"
+	detected = false
+	reinforce_t = -1.0
+	stats = {"shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
+	player.spawn(facility.player_start)
+	player.active = true
+	_beacon.visible = false
+	hud.reset()
+	phase = Phase.PLAY
+	menu.hide_all()
+	hud.visible = true
+	_capture(true)
+
+
+func _spawn(r: Dictionary) -> Soldier:
+	var s: Soldier = SOLDIER_SCENE.instantiate()
+	var sq_id: String = r.squad
+	if not squads.has(sq_id):
+		squads[sq_id] = Squad.new(sq_id)
+	s.game = self
+	s.setup(load("res://resources/soldiers/%s.tres" % r.type), squads[sq_id], r.pos, r.get("yaw", 0.0), r.get("patrol", []))
+	add_child(s)
+	soldiers.append(s)
+	return s
+
+
+func pause() -> void:
+	if phase != Phase.PLAY:
+		return
+	phase = Phase.PAUSED
+	player.active = false
+	weapons_release()
+	get_tree().paused = false
+	menu.show_pause()
+	hud.visible = false
+	_capture(false)
+
+
+func resume() -> void:
+	if phase != Phase.PAUSED:
+		return
+	phase = Phase.PLAY
+	player.active = true
+	menu.hide_all()
+	hud.visible = true
+	_capture(true)
+
+
+func weapons_release() -> void:
+	player.weapons.aiming_throw = false
+	player.drag_body = null
+
+
+func to_menu() -> void:
+	phase = Phase.MENU
+	player.active = false
+	hud.visible = false
+	menu.show_title()
+	_capture(false)
+
+
+func on_player_died() -> void:
+	player.active = false
+	get_tree().create_timer(2.2).timeout.connect(func() -> void:
+		if phase != Phase.PLAY:
+			return
+		phase = Phase.DEAD
+		hud.visible = false
+		menu.show_debrief(false, _rating())
+		_capture(false))
+
+
+func _complete() -> void:
+	phase = Phase.DONE
+	player.active = false
+	if Settings.best_time < 0.0 or time < Settings.best_time:
+		Settings.best_time = time
+		Settings.save_settings()
+	hud.visible = false
+	menu.show_debrief(true, _rating())
+	_capture(false)
+
+
+func _rating() -> String:
+	var acc := float(stats.hits) / maxf(1.0, float(stats.shots))
+	if not detected:
+		return "GHOST"
+	if stats.damage_taken < 60.0 and acc > 0.45:
+		return "SURGICAL"
+	return "PROFESSIONAL" if stats.damage_taken < 150.0 else "SURVIVOR"
+
+
+func _capture(on: bool) -> void:
+	if _test:
+		return
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("pause"):
+		if phase == Phase.PLAY:
+			pause()
+		elif phase == Phase.PAUSED:
+			resume()
+		get_viewport().set_input_as_handled()
+	elif phase == Phase.PLAY and event is InputEventMouseButton and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and not _test:
+		_capture(true)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and phase == Phase.PLAY and not _test:
+		pause()
+
+
+# ------------------------------------------------------------------ simulation
+
+func _physics_process(dt: float) -> void:
+	if phase != Phase.PLAY and phase != Phase.DEAD:
+		return
+	var sdt := dt if player.alive else dt * 0.5
+	time += sdt
+	_light_t -= sdt
+	if _light_t <= 0.0:
+		_light_t = 0.25
+		player_light = facility.light_level(player.global_position, _flashlights())
+	player.tick(sdt)
+	for s in soldiers:
+		s.tick(sdt)
+	_separate()
+	_tick_gadgets(sdt)
+	_tick_pickups()
+	_tick_radio()
+	_tick_mission(sdt)
+
+
+func _process(dt: float) -> void:
+	if phase == Phase.PLAY or phase == Phase.DEAD or phase == Phase.LOADING or phase == Phase.MENU:
+		player.update_camera(dt)
+	if phase == Phase.PLAY:
+		hud.refresh(dt)
+
+
+func _flashlights() -> Array:
+	var out := []
+	for s in soldiers:
+		if s.alive and s.model.flashlight.visible:
+			out.append(s.model.flashlight)
+	return out
+
+
+func _separate() -> void:
+	for s in soldiers:
+		if not s.alive:
+			continue
+		for o in soldiers:
+			if o == s or not o.alive:
+				continue
+			var d := Vector2(s.global_position.x - o.global_position.x, s.global_position.z - o.global_position.z)
+			if d.length() > 0.001 and d.length() < 0.7 and absf(s.global_position.y - o.global_position.y) < 1.5:
+				var k := (0.7 - d.length()) / d.length() * 0.5
+				s.global_position += Vector3(d.x * k, 0, d.y * k)
+
+
+func _tick_mission(dt: float) -> void:
+	if reinforce_t > 0.0:
+		reinforce_t -= dt
+		if reinforce_t <= 0.0:
+			Sfx.play_at("truck", Vector3(6, 1, 33))
+			hud.banner("ENEMY REINFORCEMENTS")
+			for r: Dictionary in REINFORCEMENTS:
+				var s := _spawn(r)
+				s.state = Soldier.State.COMBAT
+				s.react = randf_range(0.5, 1.5)
+			var q: Squad = squads["qrf"]
+			q.report(player.global_position, time - 4.0)
+	if mission == "extract":
+		_beacon.rotate_y(dt * 0.5)
+		if player.alive and Vector2(player.global_position.x - facility.extraction.x, player.global_position.z - facility.extraction.z).length() < 4.0:
+			_complete()
+
+
+func objective_target() -> Vector3:
+	return facility.intel_pos if mission == "infil" else facility.extraction
+
+
+func objective_text() -> String:
+	return "RECOVER THE DRIVE" if mission == "infil" else "EXTRACT — LOADING YARD"
+
+
+func _take_intel() -> void:
+	mission = "extract"
+	reinforce_t = 7.0
+	Sfx.play("objective")
+	hud.banner("DRIVE RECOVERED")
+	_beacon.visible = true
+	for s in soldiers:
+		if s.alive:
+			s.squad.report(facility.intel_pos, time - 5.0)
+			if s.state != Soldier.State.COMBAT:
+				s.state = Soldier.State.COMBAT
+				s.react = randf_range(0.5, 2.0)
+				s.mode = Soldier.Mode.IDLE
+
+
+# ------------------------------------------------------------------ sight & sound
+
+func ray(from: Vector3, to: Vector3) -> Dictionary:
+	var q := PhysicsRayQueryParameters3D.create(from, to, Layers.WORLD)
+	return get_world_3d().direct_space_state.intersect_ray(q)
+
+
+func los(a: Vector3, b: Vector3) -> bool:
+	if a.distance_squared_to(b) < 0.0001:
+		return true
+	return ray(a, b).is_empty()
+
+
+func smoke_blocks(a: Vector3, b: Vector3) -> bool:
+	for g in gadgets:
+		var s := g.smoke_sphere()
+		if s.w <= 0.0:
+			continue
+		var c := Vector3(s.x, s.y, s.z)
+		var ab := b - a
+		var t := clampf((c - a).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+		if (a + ab * t).distance_to(c) < s.w * 0.8:
+			return true
+	return false
+
+
+func say(s: Soldier, kind: String, force := false) -> void:
+	if not s.alive:
+		return
+	if not force and (s.voice_t > 0.0 or time - _last_line_t < 0.9):
+		return
+	s.voice_t = 4.0
+	_last_line_t = time
+	if player.global_position.distance_to(s.global_position) > 45.0 and kind != "nade":
+		return
+	Sfx.play_at("radio", s.eye(), -4.0)
+	hud.subtitle(s.profile.display_name, (LINES[kind] as Array).pick_random())
+
+
+func radio_alert(s: Soldier, delay: float) -> void:
+	_pending_radio.append({"s": s, "t": time + delay})
+
+
+func _tick_radio() -> void:
+	for i in range(_pending_radio.size() - 1, -1, -1):
+		var r: Dictionary = _pending_radio[i]
+		if time >= float(r.t):
+			_pending_radio.remove_at(i)
+			var s: Soldier = r.s
+			if is_instance_valid(s) and s.alive and s.state != Soldier.State.COMBAT:
+				s.alert(s.squad.last_known, "radio")
+
+
+func release_flanker_later(sq: Squad, s: Soldier) -> void:
+	get_tree().create_timer(5.0, false).timeout.connect(func() -> void:
+		if sq.flanker == s:
+			sq.flanker = null
+			sq.flank_cooldown = time + 6.0)
+
+
+## quiet = suppressed: only guards right next to it recognise gunfire; others just hear something.
+func hear_gunshot(pos: Vector3, radius: float, quiet := false) -> void:
+	for s in soldiers:
+		if not s.alive:
+			continue
+		var d := s.global_position.distance_to(pos)
+		if d > radius:
+			continue
+		if quiet:
+			if s.state == Soldier.State.COMBAT:
+				continue
+			if d < 3.5:
+				s.alert(pos, "heard")
+			else:
+				s.make_suspicious(pos, 0.6, "huh", 0.4)
+			continue
+		var clear := d < 20.0 or los(s.eye(), pos + Vector3.UP * 1.2)
+		if s.state == Soldier.State.COMBAT:
+			if s.squad.since_seen(time) > 2.5:
+				s.squad.report(pos + Vector3(randf_range(-2, 2), 0, randf_range(-2, 2)), time - 1.0)
+		elif clear:
+			s.alert(pos, "heard")
+		else:
+			s.make_suspicious(pos, 0.7)
+
+
+## Bullet impacts are audible close by, even from a suppressed weapon.
+func impact_noise(pt: Vector3) -> void:
+	for s in soldiers:
+		if s.alive and s.state != Soldier.State.COMBAT and s.global_position.distance_to(pt) < 5.0:
+			s.make_suspicious(pt, 0.5, "huh", 0.6)
+
+
+# ------------------------------------------------------------------ shooting
+
+func player_shot(o: Vector3, d: Vector3, w: WeaponData) -> void:
+	var space := get_world_3d().direct_space_state
+	var res := Ballistics.trace(space, o, d, w.penetration, 300.0,
+		func(oo: Vector3, dd: Vector3, max_t: float) -> Dictionary:
+			var best := {}
+			for s in soldiers:
+				if not s.alive:
+					continue
+				for z: Array in s.zones():
+					var t := Ballistics.ray_sphere(oo, dd, z[1], z[2])
+					var bonus := 0.12 if z[0] == "head" else 0.0
+					if t >= 0.0 and t < max_t and (best.is_empty() or t < float(best.t) - bonus):
+						best = {"t": t, "soldier": s, "zone": z[0]}
+			var lt: float = best.t if not best.is_empty() else max_t
+			for l in facility.lamps:
+				if l.dead:
+					continue
+				var t2 := Ballistics.ray_sphere(oo, dd, l.global_position, 0.3)
+				if t2 >= 0.0 and t2 < lt:
+					best = {"t": t2, "lamp": l}
+					lt = t2
+			return best,
+		func(pt: Vector3, n: Vector3, is_exit: bool, mat: String) -> void:
+			fx.hole(pt, n)
+			fx.burst("dust", pt, n)
+			if not is_exit:
+				if mat in Mats.METALLIC:
+					fx.burst("spark", pt, n)
+				if player.camera.global_position.distance_to(pt) < 25.0:
+					Sfx.play_at("impact_metal" if mat in Mats.METALLIC else "impact", pt, -4.0)
+				impact_noise(pt))
+	var end: Vector3 = res.end
+	var end_t := o.distance_to(end)
+	if randf() < w.tracer_chance:
+		fx.tracer(o + d * 1.2 + player.right() * 0.08 + Vector3.DOWN * 0.08, end)
+	var tgt: Dictionary = res.get("target", {})
+	# near misses pin guards down
+	for s in soldiers:
+		if not s.alive or tgt.get("soldier") == s:
+			continue
+		var hp := s.head_pos()
+		var t := clampf((hp - o).dot(d), 0.0, end_t)
+		var miss := (o + d * t).distance_to(hp)
+		if miss < 1.4:
+			s.supp = minf(1.0, s.supp + 0.3 * (1.4 - miss))
+			if s.state != Soldier.State.COMBAT:
+				if w.suppressed:
+					impact_noise(hp)
+				else:
+					s.alert(player.global_position, "heard")
+	if tgt.is_empty():
+		return
+	if tgt.has("lamp"):
+		_break_lamp(tgt.lamp)
+		return
+	stats.hits += 1
+	var s: Soldier = tgt.soldier
+	var zone: String = tgt.zone
+	var mul := w.head_mult * s.profile.helmet if zone == "head" else (0.7 if zone == "legs" else 1.0)
+	if zone != "head":
+		mul *= s.profile.armor
+	mul *= float(res.mul) * clampf(1.0 - (end_t - w.effective_range) / (w.effective_range * 1.5), 0.5, 1.0)
+	if zone == "head":
+		stats.heads += 1
+		if s.profile.helmet < 1.0:
+			Sfx.play_at("helmet", end, 0.0, false)
+	Sfx.play_at("flesh", end, 0.0, false)
+	Sfx.play("hit_head" if zone == "head" else "hit", -6.0)
+	fx.burst("blood", end, -d)
+	s.take_hit(w.damage * mul, d, zone, true, w.suppressed)
+	hud.hitmarker(not s.alive)
+	if not s.alive and int(res.pens) > 0:
+		hud.toast("THROUGH COVER")
+	elif not s.alive and zone == "head":
+		hud.toast("HEADSHOT")
+
+
+func _break_lamp(l: Lamp) -> void:
+	l.shatter()
+	fx.burst("glass", l.global_position, Vector3.DOWN)
+	_light_t = 0.0
+	hud.learn("lights")
+	for s in soldiers:
+		if s.alive and s.state != Soldier.State.COMBAT and s.global_position.distance_to(l.global_position) < 16.0:
+			var below := l.global_position
+			below.y = s.global_position.y
+			s.make_suspicious(below, 0.5, "lights")
+
+
+func soldier_shot(s: Soldier, target: Vector3, extra: float, suppressive: bool) -> void:
+	var muzzle := s.model.muzzle.global_position
+	stats.enemy_shots += 1
+	var prof := s.profile
+	var pellets := 8 if prof.weapon_kind == "shotgun" else 1
+	var base := (target - muzzle).normalized()
+	Sfx.play_at("enemy_" + prof.weapon_kind, muzzle, 2.0 if prof.weapon_kind == "lmg" else 0.0)
+	fx.muzzle(muzzle, 0.7 if prof.weapon_kind == "lmg" else 0.55)
+	if randf() < 0.5:
+		fx.flash_light(muzzle, Color("ffb060"), 2.5, 0.05, 7.0)
+	var space := get_world_3d().direct_space_state
+	var eye := player.eye_pos()
+	for i in pellets:
+		var cone := (0.065 if prof.weapon_kind == "shotgun" else s.aim_err * prof.spread_mult) + extra
+		var d := Ballistics.spread(base, cone)
+		var first := i == 0
+		var res := Ballistics.trace(space, muzzle, d, prof.penetration, 160.0,
+			func(oo: Vector3, dd: Vector3, max_t: float) -> Dictionary:
+				if not player.alive:
+					return {}
+				var h := player.ray_hit(oo, dd)
+				return h if not h.is_empty() and float(h.t) < max_t else {},
+			func(pt: Vector3, n: Vector3, is_exit: bool, mat: String) -> void:
+				if pt.distance_to(player.global_position) < 30.0 and (first or randf() < 0.3):
+					fx.hole(pt, n)
+					fx.burst("dust", pt, n)
+					if not is_exit and pt.distance_to(eye) < 8.0:
+						Sfx.play_at("impact_metal" if mat in Mats.METALLIC else "impact", pt, -2.0))
+		var end: Vector3 = res.end
+		var end_t := muzzle.distance_to(end)
+		if first or randf() < 0.3:
+			fx.tracer(muzzle, end)
+		var tgt: Dictionary = res.get("target", {})
+		if not tgt.is_empty():
+			var zone: String = tgt.zone
+			var dmg := prof.damage * float(res.mul) * (2.2 if zone == "head" else (0.7 if zone == "legs" else 1.0))
+			if prof.weapon_kind == "shotgun":
+				dmg *= clampf(1.4 - end_t / 14.0, 0.25, 1.0)
+			stats.enemy_hits += 1
+			player.take_damage(dmg, muzzle, int(res.pens) > 0)
+		else:
+			var t := clampf((eye - muzzle).dot(d), 0.0, end_t)
+			var cp := muzzle + d * t
+			var miss := cp.distance_to(eye)
+			if miss < 1.8 and player.alive and first:
+				player.near_miss((0.16 if suppressive else 0.1) * (1.8 - miss) / 1.8, cp)
+	# gunfire draws other squads in
+	for o in soldiers:
+		if o.alive and o.state == Soldier.State.CALM and o.squad != s.squad and o.global_position.distance_to(s.global_position) < 45.0:
+			o.make_suspicious(s.global_position, 0.6, "huh", 0.8)
+
+
+# ------------------------------------------------------------------ equipment
+
+func spawn_gadget(type: String, pos: Vector3, vel: Vector3, from_player: bool) -> Gadget:
+	var g := Gadget.create(type, from_player)
+	add_child(g)
+	g.global_position = pos
+	g.linear_velocity = vel
+	g.gravity_scale = 20.0 / float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
+	g.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
+	g.detonated.connect(_on_detonate)
+	gadgets.append(g)
+	return g
+
+
+func enemy_throw(from: Vector3, target: Vector3) -> void:
+	var dist := Vector2(target.x - from.x, target.z - from.z).length()
+	var apex := maxf(from.y, target.y) + 2.5
+	var vy := sqrt(2.0 * 20.0 * (apex - from.y))
+	var tt := vy / 20.0 + sqrt(2.0 * (apex - target.y) / 20.0)
+	var v := Vector3((target.x - from.x) / tt, vy, (target.z - from.z) / tt)
+	var g := spawn_gadget("frag", from, v, false)
+	g.fuse = maxf(2.2, tt + 1.4)
+	if dist < 0.1:
+		g.linear_velocity = Vector3.UP
+
+
+func _tick_gadgets(dt: float) -> void:
+	for i in range(gadgets.size() - 1, -1, -1):
+		var g := gadgets[i]
+		if not g.step(dt):
+			gadgets.remove_at(i)
+			g.queue_free()
+			continue
+		if g.type == "frag" and not g.live and g.fuse < 2.4:
+			for s in soldiers:
+				if not s.alive or s.flee_from or s.blind > 0.0 or s.global_position.distance_to(g.global_position) > 7.5:
+					continue
+				if not g.owner_is_player and s.global_position.distance_to(g.global_position) > 5.0:
+					continue
+				if randf() < dt * 3.0 and los(s.eye(), g.global_position + Vector3.UP * 0.2):
+					s.flee(g)
+		elif g.type == "decoy" and g.live and g.tick <= 0.0:
+			g.tick = randf_range(0.35, 0.6)
+			Sfx.play_at("decoy", g.global_position)
+			for s in soldiers:
+				if s.alive and s.state != Soldier.State.COMBAT and s.global_position.distance_to(g.global_position) < 20.0:
+					s.make_suspicious(g.global_position, 0.55, "noise", 0.4)
+					s.susp_t = minf(s.susp_t, 1.2)
+
+
+func _on_detonate(g: Gadget) -> void:
+	var p := g.global_position + Vector3.UP * 0.15
+	match g.type:
+		"frag":
+			fx.explosion(p)
+			fx.hole(g.global_position + Vector3.UP * 0.05, Vector3.UP, 9.0, true)
+			Sfx.play_at("explode", p, 4.0, false)
+			for s in soldiers:
+				if not s.alive:
+					continue
+				var c := s.global_position + Vector3.UP
+				var d := c.distance_to(p)
+				if d < 7.5 and los(p, c):
+					s.take_hit(190.0 * pow(1.0 - d / 7.5, 1.2), (c - p).normalized(), "body", g.owner_is_player)
+			var pc := player.chest_pos()
+			var dp := pc.distance_to(p)
+			if dp < 7.5 and los(p, pc):
+				player.take_damage(150.0 * pow(1.0 - dp / 7.5, 1.3), p)
+			if dp < 14.0:
+				player.supp = minf(1.0, player.supp + 0.8 * (1.0 - dp / 14.0))
+			var cd := player.camera.global_position.distance_to(p)
+			if cd < 30.0:
+				player.trauma = minf(1.0, player.trauma + 0.6 * (1.0 - cd / 30.0))
+			hear_gunshot(p, 60.0)
+		"flash":
+			Sfx.play_at("bang", p, 4.0, false)
+			fx.flash_light(p, Color.WHITE, 30.0, 0.3, 28.0)
+			fx.burst("spark", p)
+			for s in soldiers:
+				if not s.alive:
+					continue
+				var e := s.eye()
+				var d := e.distance_to(p)
+				if d > 15.0 or not los(p, e) or smoke_blocks(p, e):
+					continue
+				var to := (p - e).normalized()
+				var facing := to.x * s.facing().x + to.z * s.facing().z
+				var k := (1.0 - d / 15.0) * (1.0 if facing > 0.0 else 0.35)
+				if k < 0.1:
+					continue
+				s.blind = maxf(s.blind, 1.0 + 4.5 * k)
+				s.flinch = 0.5
+				s.peeking = false
+				s.burst = 0
+				if s.state != Soldier.State.COMBAT:
+					s.alert(player.global_position, "heard")
+					s.react = 0.0
+				say(s, "blind", true)
+			var eye := player.eye_pos()
+			var dp := eye.distance_to(p)
+			if dp < 18.0 and los(p, eye):
+				var face := player.view_dir().dot((p - eye).normalized())
+				var k2 := (1.0 - dp / 18.0) * clampf((face + 0.3) / 1.3, 0.12, 1.0)
+				hud.flash = maxf(hud.flash, k2 * 1.8)
+				Sfx.play("ring", linear_to_db(clampf(k2, 0.05, 1.0)), 0.0)
+			hear_gunshot(p, 35.0)
+
+
+# ------------------------------------------------------------------ interaction
+
+func takedown_target() -> Soldier:
+	if not player.alive or player.drag_body:
+		return null
+	var f := player.view_dir()
+	for s in soldiers:
+		if not s.alive or (s.state == Soldier.State.COMBAT and s.sees):
+			continue
+		var to := s.global_position - player.global_position
+		var d := Vector2(to.x, to.z).length()
+		if d > 1.9 or d < 0.01 or absf(to.y) > 0.8:
+			continue
+		if (to.x * f.x + to.z * f.z) / d < 0.5:
+			continue
+		var behind := (to.x * s.facing().x + to.z * s.facing().z) / d
+		if behind > 0.1 or s.state == Soldier.State.CALM or s.blind > 0.0:
+			return s
+	return null
+
+
+func corpse_near() -> Soldier:
+	var best: Soldier = null
+	var bd := 1.9
+	for s in soldiers:
+		if s.alive or s.death_t < 0.6:
+			continue
+		var d := Vector2(s.global_position.x - player.global_position.x, s.global_position.z - player.global_position.z).length()
+		if d < bd and absf(s.global_position.y - player.global_position.y) < 1.2:
+			bd = d
+			best = s
+	return best
+
+
+func interact_target() -> Pickup:
+	var eye := player.eye_pos()
+	var d := player.view_dir()
+	var best: Pickup = null
+	var bd := 2.3
+	for p in facility.pickups:
+		if p.taken or p.is_auto():
+			continue
+		var to := p.global_position + Vector3.UP * 0.15 - eye
+		var dist := to.length()
+		if dist > bd or to.normalized().dot(d) < 0.75:
+			continue
+		bd = dist
+		best = p
+	return best
+
+
+func interact() -> void:
+	if not player.alive:
+		return
+	var t := takedown_target()
+	if t:
+		Sfx.play_at("takedown", t.global_position + Vector3.UP, 0.0, false)
+		player.trauma += 0.15
+		player.viewmodel.recoil = 0.08
+		player.viewmodel.recoil_rot = -0.3
+		t.die(player.view_dir(), false, true)
+		for o in soldiers:
+			if o.alive and o.global_position.distance_to(t.global_position) < 15.0 and o.sees:
+				o.alert(player.global_position, "saw")
+		hud.learn("takedown")
+		return
+	var p := interact_target()
+	if p == null:
+		var c := corpse_near()
+		if c:
+			player.start_drag(c)
+		return
+	match p.kind:
+		Pickup.Kind.MEDKIT:
+			if player.hp >= Player.MAX_HP:
+				hud.toast("HEALTH FULL")
+				return
+			player.hp = minf(Player.MAX_HP, player.hp + 50.0)
+			hud.toast("+50 HEALTH")
+		Pickup.Kind.AMMO:
+			player.weapons.resupply()
+			hud.toast("RESUPPLIED")
+		Pickup.Kind.INTEL:
+			_take_intel()
+	p.take()
+
+
+func _tick_pickups() -> void:
+	if not player.alive:
+		return
+	for p in facility.pickups:
+		if p.taken or not p.is_auto() or p.global_position.distance_to(player.global_position) > 1.3:
+			continue
+		if p.kind == Pickup.Kind.MAG:
+			var got := 0
+			for _i in p.amount:
+				if player.weapons.add_mag(0, player.weapons.slots[0].mag_size):
+					got += 1
+			if got == 0:
+				continue
+			hud.toast("+%d MAGAZINE%s" % [got, "S" if got > 1 else ""])
+		else:
+			var g: Dictionary = {}
+			for x in player.weapons.gadgets:
+				if x.type == "frag":
+					g = x
+			if g.is_empty() or int(g.n) >= 3:
+				continue
+			g.n = int(g.n) + 1
+			hud.toast("+1 FRAG")
+		p.take()
+
+
+func mark_target() -> void:
+	var o := player.eye_pos()
+	var d := player.view_dir()
+	var wall := ray(o, o + d * 150.0)
+	var max_t := 150.0 if wall.is_empty() else o.distance_to(wall.position)
+	var best: Soldier = null
+	var ba := 0.04
+	for s in soldiers:
+		if not s.alive or s.tagged:
+			continue
+		var hp := s.head_pos()
+		var to := hp - o
+		if to.length() > 150.0:
+			continue
+		var hit := false
+		for z: Array in s.zones():
+			var t := Ballistics.ray_sphere(o, d, z[1], z[2])
+			if t >= 0.0 and t < max_t:
+				hit = true
+		var a := to.normalized().angle_to(d)
+		if hit or (a < ba and los(o, hp)):
+			ba = a
+			best = s
+	if best:
+		best.tagged = true
+		Sfx.play("tag")
+		hud.toast("MARKED — " + best.profile.display_name)
+
+
+func on_soldier_killed(s: Soldier, headshot: bool, takedown: bool) -> void:
+	stats.kills += 1
+	if takedown:
+		stats.takedowns += 1
+	Sfx.play_at("body", s.global_position + Vector3.UP * 0.3)
+	facility.add_pickup(Pickup.Kind.MAG, s.global_position, 2 if s.profile.id == "heavy" else 1, false)
+	if s.grenades > 0 and randf() < 0.6:
+		facility.add_pickup(Pickup.Kind.FRAG, s.global_position + Vector3(0.3, 0, 0.2), 1, false)
+	if not takedown:
+		for o in s.squad.members:
+			if o != s and o.alive and o.state == Soldier.State.COMBAT and o.global_position.distance_to(s.global_position) < 35.0 and randf() < 0.7:
+				say(o, "mandown")
+				break
+	hud.hint_event("kill")

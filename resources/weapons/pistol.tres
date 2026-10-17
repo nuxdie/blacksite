@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/weapon_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "pistol"
+display_name = "P9 SD"
+description = "Suppressed sidearm."
+mag_size = 13
+spare_mags = 3
+rpm = 420.0
+damage = 38.0
+head_mult = 3.0
+hip_spread = 0.022
+ads_spread = 0.002
+kick = 0.028
+kick_yaw = 0.008
+reload_time = 1.5
+reload_empty_time = 1.85
+penetration = 0.2
+effective_range = 30.0
+loudness = 8.0
+suppressed = true
+modes = PackedStringArray("SEMI")
+ads_fov = 56.0
+scoped = false
+tracer_chance = 0.0
+sound = "sd"
