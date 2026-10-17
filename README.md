@@ -39,12 +39,14 @@ assets/fonts/            Rajdhani (SIL OFL, see OFL.txt)
 - **Ballistics**: rounds lose power through plaster, wood, sheet metal and containers, and stop at concrete and steel. This applies both ways.
 - **Arsenal**: three starting primaries, a suppressed sidearm, magazines tracked individually, and four thrown gadgets with an arc preview. Smoke is a volumetric fog volume that blocks AI sight.
 - **Scavenging**: every weapon has a caliber (5.56, 7.62, 9mm, 12ga). Guards drop their own weapon (AR-7, LMG-80, BRX-12) with what's left in its magazine, plus the loose rounds they carried. Rounds only load into weapons of the same caliber, so a marksman rifle can live off riflemen and a carbine can't. Swapping your primary leaves the old one on the ground.
-- **Hacking** (hold H on remote devices, hold F on physical ones; progress persists):
-  - *Cameras* sweep, build awareness like guards, and radio in your position (and any bodies they see). Hacking one loops its feed for 90 s.
-  - *Comms relay* (office roof) jams all guard radio for two minutes: squad alerts and camera alarms go nowhere.
-  - *Security terminal* (guard booth) takes every camera offline for good.
-  - *Lamps* can be switched off silently instead of shot out.
-  - *The drive* is now a download at the warehouse laptop. Hold it for nine seconds; if you're interrupted, the progress is kept.
+- **Security, power and comms**: nothing is hacked through the air.
+  - *Cameras* (five) sweep, build awareness like guards do, and radio in your position and any bodies they see.
+  - *The security network* is reached at three access points: the booth terminal, a junction box on the warehouse's south wall, and the server cabinet in the office. With the booth guard's badge, login is instant and clean. Without it, you spend 15 s bypassing security and it shows up in their logs.
+  - *The tablet* shows live night-vision feeds. Looping a feed is quiet and lasts 90 s. Disabling a camera is permanent, but security sends a guard to fix it. With admin access you can shut the whole system down, and someone will come to the terminal to bring it back.
+  - *Trace*: every action leaves log entries. Fill the meter and intrusion detection kicks you out, locks that port for a minute, and sends guards to look.
+  - *Breakers* cut a zone's lights silently. Guards notice and send someone to reset the panel.
+  - *Comms relay* (office roof): sabotage it and their radio dies, so alarms and squad calls go nowhere, until a guard walks up and repairs it.
+  - *The data*: plug a drive into the laptop and it copies on its own for 35 s. Any guard who wanders close will pull it. Come back to retrieve it.
 
 ## Automated checks
 

@@ -12,7 +12,7 @@ const ROSTER := [
 	{"squad": "yard", "type": "rifleman", "pos": Vector3(-22, 0, -14), "patrol": [[-22, -14], [-9, -1], [2, -12], [-12, -14]]},
 	{"squad": "yard", "type": "rifleman", "pos": Vector3(-10, 0, -5), "yaw": 0.0},
 	{"squad": "yard", "type": "rifleman", "pos": Vector3(-14, 3.7, 14), "yaw": 0.0},
-	{"squad": "yard", "type": "rifleman", "pos": Vector3(-12.5, 0, -17.5), "yaw": 0.45},
+	{"squad": "yard", "type": "rifleman", "pos": Vector3(-12.5, 0, -17.5), "yaw": 0.45, "badge": true},
 	{"squad": "office", "type": "breacher", "pos": Vector3(-27, 0, 21.2), "patrol": [[-27, 21.2], [-3, 21.2]]},
 	{"squad": "office", "type": "rifleman", "pos": Vector3(-15, 0, 27.5), "yaw": 0.0},
 	{"squad": "office", "type": "rifleman", "pos": Vector3(-22, 0, 15), "yaw": -PI / 2},
@@ -39,7 +39,7 @@ const LINES := {
 	"hit": ["I'm hit!", "Taking fire!"], "supp": ["Suppressing!", "Keep his head down!"], "huh": ["Huh?", "Hold on...", "What was that?"],
 	"calm": ["Must be nothing.", "...Nothing."], "push": ["Pushing!", "Moving in!"], "body": ["Body here!", "Someone's down!"],
 	"blind": ["I can't see!", "Flash — I'm blind!"], "lights": ["Lights just went out...", "Who killed the lights?"],
-	"noise": ["Hear that?", "Something over there..."], "jammed": ["Radio check — anyone?", "Comms are down!", "I've got nothing but static."], "smoke": ["Smoke! Watch the smoke!", "He's in the smoke!"],
+	"noise": ["Hear that?", "Something over there..."], "jammed": ["Radio check — anyone?", "Comms are down!", "I've got nothing but static."], "power": ["Power's out.", "Lights just died...", "Who tripped the breaker?"], "repair": ["I'll go take a look.", "On it — checking the box."], "pulled": ["Someone's been at the laptop!", "There's a drive in here!"], "smoke": ["Smoke! Watch the smoke!", "He's in the smoke!"],
 }
 
 var phase := Phase.LOADING
@@ -64,9 +64,16 @@ var _pending_radio: Array[Dictionary] = []
 var _beacon: Node3D
 var _test: TestRunner
 var _shot_hit := false
-var jam_t := 0.0
-var hack_target: Object = null
-var hacking := false
+var comms_down := false
+var has_badge := false
+var trace := 0.0
+var tablet_access: Device = null
+var tablet_admin := false
+var tablet_cam := 0
+var use_target: Device = null
+var using := false
+var use_progress: Dictionary = {}
+var _repairs: Array[Dictionary] = []
 var _body_scan_t := 0.0
 
 
@@ -158,9 +165,15 @@ func start_mission() -> void:
 	mission = "infil"
 	detected = false
 	reinforce_t = -1.0
-	jam_t = 0.0
-	hack_target = null
-	hacking = false
+	comms_down = false
+	has_badge = false
+	trace = 0.0
+	tablet_access = null
+	player.in_tablet = false
+	use_target = null
+	using = false
+	use_progress.clear()
+	_repairs.clear()
 	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
 	player.spawn(facility.player_start)
 	player.active = true
@@ -179,6 +192,7 @@ func _spawn(r: Dictionary) -> Soldier:
 		squads[sq_id] = Squad.new(sq_id)
 	s.game = self
 	s.setup(load("res://resources/soldiers/%s.tres" % r.type), squads[sq_id], r.pos, r.get("yaw", 0.0), r.get("patrol", []))
+	s.carries_badge = r.get("badge", false)
 	add_child(s)
 	soldiers.append(s)
 	return s
@@ -257,6 +271,9 @@ func _capture(on: bool) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if phase == Phase.PLAY and tablet_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("pause"):
 		if phase == Phase.PLAY:
 			pause()
@@ -345,7 +362,15 @@ func objective_target() -> Vector3:
 
 
 func objective_text() -> String:
-	return "RECOVER THE DRIVE" if mission == "infil" else "EXTRACT — LOADING YARD"
+	if mission != "infil":
+		return "EXTRACT — LOADING YARD"
+	for dv in facility.devices:
+		if dv.kind == Device.Kind.LAPTOP:
+			if dv.copy_state == "copying":
+				return "KEEP GUARDS AWAY FROM THE LAPTOP"
+			if dv.copy_state == "done":
+				return "RETRIEVE THE DRIVE"
+	return "COPY THE DATA"
 
 
 func _take_intel() -> void:
@@ -403,7 +428,7 @@ func say(s: Soldier, kind: String, force := false) -> void:
 
 
 func radio_alert(s: Soldier, delay: float) -> void:
-	if jam_t > 0.0:
+	if comms_down:
 		return
 	_pending_radio.append({"s": s, "t": time + delay})
 
@@ -724,67 +749,52 @@ func _on_detonate(g: Gadget) -> void:
 
 # ------------------------------------------------------------------ interaction
 
-# ------------------------------------------------------------------ hacking
+# ------------------------------------------------------------------ networks, power, comms
 
-func hackables() -> Array:
-	var out: Array = []
-	out.append_array(facility.devices)
-	out.append_array(facility.lamps)
-	return out
-
-
-## The device under the crosshair that can be hacked from here, or null.
-func find_hack_target() -> Object:
-	if not player.alive or player.drag_body or player.vault_t >= 0.0:
+## The physical device in reach that interact would use, or null.
+func find_use_target() -> Device:
+	if not player.alive or player.drag_body or player.vault_t >= 0.0 or tablet_access:
 		return null
 	var eye := player.eye_pos()
 	var d := player.view_dir()
-	var best: Object = null
-	var best_ang := INF
-	for h: Object in hackables():
-		if not h.can_hack():
+	var best: Device = null
+	var best_dot := 0.72
+	for dv in facility.devices:
+		if dv.kind == Device.Kind.CAMERA or dv.use_label(self) == "":
 			continue
-		var hp: Vector3 = h.hack_point()
-		var to := hp - eye
-		var dist := to.length()
-		if dist > h.hack_range():
+		var to := dv.use_point() - eye
+		if to.length() > 2.3:
 			continue
-		var ang := to.normalized().angle_to(d)
-		var tol := 0.45 if h.is_physical() else maxf(0.025, 0.45 / dist)
-		if ang > tol or ang > best_ang:
-			continue
-		if not h.is_physical() and not los(eye, hp - to.normalized() * 0.35):
-			continue
-		best = h
-		best_ang = ang
+		var dot := to.normalized().dot(d)
+		if dot > best_dot:
+			best_dot = dot
+			best = dv
 	return best
 
 
 func _tick_devices(dt: float) -> void:
-	jam_t = maxf(0.0, jam_t - dt)
 	for dv in facility.devices:
 		dv.tick(dt, self)
-	hack_target = find_hack_target()
-	hacking = false
-	if hack_target and player.active:
-		var key := "interact" if hack_target.is_physical() else "hack"
-		if Input.is_action_pressed(key):
-			hacking = true
-			hack_target.hack_progress = minf(1.0, float(hack_target.hack_progress) + dt / float(hack_target.hack_time()))
-			if hack_target.hack_progress >= 1.0:
-				stats.hacks += 1
-				Sfx.play("objective", -8.0, 0.0)
-				hud.learn("hack")
-				hack_target.on_hacked(self)
-				hack_target = null
-				hacking = false
-	player.hacking = hacking
-	# remote hacks you walk away from slowly lose their foothold; physical ones keep their progress
-	for h: Object in hackables():
-		if h != hack_target or not hacking:
-			if not h.is_physical() and float(h.hack_progress) > 0.0:
-				h.hack_progress = maxf(0.0, float(h.hack_progress) - dt * 0.12)
-	# cameras spot bodies too
+	trace = maxf(0.0, trace - dt * (0.4 if tablet_access else 1.5))
+	use_target = find_use_target()
+	using = false
+	if use_target and player.active and use_target.can_use(self) and takedown_target() == null:
+		if Input.is_action_pressed("interact"):
+			using = true
+			var prog: float = use_progress.get(use_target, 0.0) + dt / use_target.use_time(self)
+			use_progress[use_target] = prog
+			if prog >= 1.0:
+				use_progress.erase(use_target)
+				var dv := use_target
+				use_target = null
+				using = false
+				dv.on_used(self)
+	player.hacking = using
+	if tablet_access:
+		_tick_tablet()
+	_tick_repairs()
+	_tick_laptop_watch()
+	# cameras that are still watching spot bodies too
 	_body_scan_t -= dt
 	if _body_scan_t <= 0.0:
 		_body_scan_t = 1.0
@@ -794,57 +804,236 @@ func _tick_devices(dt: float) -> void:
 			for dv in facility.devices:
 				if dv.global_position.distance_to(c.global_position) < 22.0 and dv.sees_point(self, c.global_position + Vector3.UP * 0.3):
 					c.corpse_found = true
-					_camera_dispatch(c.global_position, "body")
+					_dispatch(c.global_position, "body")
 					break
 
 
-func jam_comms(seconds: float) -> void:
-	jam_t = seconds
-	_pending_radio = _pending_radio.filter(func(r: Dictionary) -> bool: return r.has("release"))
-	hud.banner("COMMS JAMMED")
-	for s in soldiers:
-		if s.alive and s.state == Soldier.State.COMBAT and randf() < 0.5:
-			say(s, "jammed")
-			break
-
-
-func cameras_offline() -> void:
+func cameras() -> Array[Device]:
+	var out: Array[Device] = []
 	for dv in facility.devices:
 		if dv.kind == Device.Kind.CAMERA:
-			dv.set_offline()
-	hud.banner("CAMERAS OFFLINE")
+			out.append(dv)
+	return out
+
+
+# --- the tablet: a live session on the security network
+
+func open_tablet(access: Device, exploited: bool) -> void:
+	tablet_access = access
+	tablet_admin = has_badge
+	tablet_cam = 0
+	player.in_tablet = true
+	stats.hacks += 1
+	if exploited:
+		add_trace(45.0, "Unauthorised login")
+	hud.learn("network")
+	Sfx.play("ui_select", -4.0, 0.0)
+
+
+func close_tablet() -> void:
+	if not tablet_access:
+		return
+	tablet_access = null
+	player.in_tablet = false
+	Sfx.play("ui_move", -4.0, 0.0)
+
+
+func _tick_tablet() -> void:
+	if not player.alive or player.global_position.distance_to(tablet_access.use_point()) > 2.6 or player.last_hit < 0.1:
+		close_tablet()
+
+
+func tablet_input(event: InputEvent) -> bool:
+	if not tablet_access:
+		return false
+	var cams := cameras()
+	if event.is_action_pressed("lean_left"):
+		tablet_cam = (tablet_cam - 1 + cams.size()) % cams.size()
+	elif event.is_action_pressed("lean_right"):
+		tablet_cam = (tablet_cam + 1) % cams.size()
+	elif event.is_action_pressed("interact"):
+		var c := cams[tablet_cam]
+		if c.camera_live():
+			c.loop_feed()
+			add_trace(12.0, "Feed buffer anomaly")
+			hud.toast("%s  ·  FEED LOOPED %ds" % [c.label, int(Device.LOOP_TIME)])
+	elif event.is_action_pressed("gadget_cycle"):
+		var c := cams[tablet_cam]
+		if not c.disabled and not c.destroyed:
+			c.disable()
+			add_trace(25.0, "Camera offline")
+			_schedule_repair(c, 20.0)
+			hud.toast(c.label + "  ·  DISABLED  ·  SECURITY WILL NOTICE")
+	elif event.is_action_pressed("reload") and tablet_admin:
+		for c in cams:
+			if not c.destroyed:
+				c.disable()
+		add_trace(40.0, "Camera system shutdown")
+		_schedule_repair(_terminal(), 15.0)
+		hud.banner("CAMERAS OFFLINE")
+	elif event.is_action_pressed("hack") or event.is_action_pressed("pause"):
+		close_tablet()
+	else:
+		return event is InputEventKey or event is InputEventMouseButton
+	Sfx.play("ui_move", -6.0, 0.0)
+	return true
+
+
+func _terminal() -> Device:
+	for dv in facility.devices:
+		if dv.kind == Device.Kind.ACCESS and dv.label == "SECURITY TERMINAL":
+			return dv
+	return null
+
+
+## Intrusion detection: enough suspicious activity and security kicks you out and comes looking.
+func add_trace(amount: float, reason: String) -> void:
+	trace += amount
+	hud.trace_event(reason)
+	if trace >= 100.0:
+		trace = 60.0
+		var at := tablet_access
+		close_tablet()
+		if at:
+			at.locked = 60.0
+			hud.banner("INTRUSION DETECTED")
+			_dispatch(at.use_point(), "investigate", 2)
+
+
+func restore_cameras() -> void:
+	for c in cameras():
+		if c.disabled and not c.destroyed:
+			c.repaired(self)
+	hud.toast("CAMERAS BACK ONLINE")
+
+
+# --- comms, power, repairs
+
+func jam_comms(relay: Device) -> void:
+	comms_down = true
+	_pending_radio = _pending_radio.filter(func(r: Dictionary) -> bool: return r.has("release"))
+	hud.banner("COMMS DOWN")
+	_schedule_repair(relay, 30.0)
+
+
+func comms_restored() -> void:
+	comms_down = false
+	hud.toast("ENEMY COMMS RESTORED")
+
+
+func set_zone_power(breaker: Device, on: bool) -> void:
+	for l in facility.lamps:
+		if l.zone == breaker.zone:
+			if on:
+				l.power_on()
+			else:
+				l.power_off()
+	_light_t = 0.0
+	if on:
+		return
+	hud.learn("lights")
+	for s in soldiers:
+		if s.alive and s.state == Soldier.State.CALM and _zone_of(s.global_position) == breaker.zone:
+			s.make_suspicious(s.global_position + s.facing() * 2.0, 0.3, "power")
+	_schedule_repair(breaker, 20.0)
+
+
+func _zone_of(p: Vector3) -> String:
+	return facility.zone_of(p)
+
+
+func _schedule_repair(dv: Device, delay: float) -> void:
+	_repairs.append({"device": dv, "t": time + delay})
+
+
+## Someone gets sent to fix whatever stopped working.
+func _tick_repairs() -> void:
+	for i in range(_repairs.size() - 1, -1, -1):
+		var r: Dictionary = _repairs[i]
+		if time < float(r.t):
+			continue
+		var dv: Device = r.device
+		var broken := (dv.kind == Device.Kind.CAMERA and dv.disabled) or (dv.kind != Device.Kind.CAMERA and dv.kind != Device.Kind.ACCESS and dv.sabotaged) \
+			or (dv.kind == Device.Kind.ACCESS and cameras().any(func(c: Device) -> bool: return c.disabled))
+		if not broken:
+			_repairs.remove_at(i)
+			continue
+		if dv.repair_pending:
+			continue
+		var worker := _nearest_free(dv.global_position)
+		if worker == null:
+			r.t = time + 10.0
+			continue
+		dv.repair_pending = true
+		var stand := NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, dv.global_position)
+		worker.assign_task(stand, dv, 6.0 if dv.kind != Device.Kind.BREAKER else 3.0)
+		_repairs.remove_at(i)
+
+
+func _nearest_free(p: Vector3) -> Soldier:
+	var best: Soldier = null
+	var bd := INF
+	for s in soldiers:
+		if s.alive and s.state != Soldier.State.COMBAT and s.task.is_empty() and s.blind <= 0.0:
+			var d := s.global_position.distance_to(p)
+			if d < bd:
+				bd = d
+				best = s
+	return best
+
+
+## Guards who wander near the laptop while it's copying notice the drive and pull it.
+func _tick_laptop_watch() -> void:
+	var lap: Device = null
+	for dv in facility.devices:
+		if dv.kind == Device.Kind.LAPTOP:
+			lap = dv
+	if lap == null or lap.copy_state != "copying" or lap.repair_pending:
+		return
+	for s in soldiers:
+		if not s.alive or not s.task.is_empty() or s.global_position.distance_to(lap.global_position) > 7.0:
+			continue
+		if los(s.eye(), lap.use_point() + Vector3.UP * 0.1):
+			lap.repair_pending = true
+			s.assign_task(NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, lap.global_position), lap, 1.5)
+			return
 
 
 func data_downloaded() -> void:
 	_take_intel()
 
 
+# --- cameras
+
 func camera_alarm(cam: Device) -> void:
 	Sfx.play_at("alarm", cam.global_position, 2.0, false)
 	hud.hint_event("camera_alarm")
-	if jam_t > 0.0:
-		hud.toast("CAMERA ALARM BLOCKED  ·  COMMS JAMMED")
+	if comms_down:
+		hud.toast("CAMERA ALARM  ·  NOBODY ON THE RADIO TO HEAR IT")
 		return
-	hud.subtitle("SECURITY", "Intruder on camera.")
-	_camera_dispatch(player.global_position, "saw")
+	hud.subtitle("SECURITY", "Intruder on %s." % cam.label)
+	_dispatch(player.global_position, "saw")
 
 
 func camera_report(_cam: Device) -> void:
-	if jam_t > 0.0:
+	if comms_down:
 		return
 	for sq: Squad in squads.values():
 		if sq.alive_members().any(func(m: Soldier) -> bool: return m.state == Soldier.State.COMBAT):
 			sq.report(player.global_position, time)
 
 
-## Security calls it in over the radio: the nearest guards respond.
-func _camera_dispatch(pos: Vector3, how: String) -> void:
-	if jam_t > 0.0:
+## Security radios it in: the nearest guards respond.
+func _dispatch(pos: Vector3, how: String, count := 3) -> void:
+	if comms_down and how != "investigate":
 		return
 	var near := soldiers.filter(func(s: Soldier) -> bool: return s.alive)
 	near.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.global_position.distance_to(pos) < b.global_position.distance_to(pos))
-	for i in mini(3, near.size()):
+	for i in mini(count, near.size()):
 		var s: Soldier = near[i]
+		if how == "investigate":
+			s.make_suspicious(pos, 0.9, "huh")
+			continue
 		s.squad.report(pos, time)
 		if s.state != Soldier.State.COMBAT:
 			s.alert(pos, how if how == "body" else "radio")
@@ -900,7 +1089,7 @@ func interact_target() -> Pickup:
 
 
 func interact() -> void:
-	if not player.alive or (hack_target and hack_target.is_physical()):
+	if not player.alive:
 		return
 	var t := takedown_target()
 	if t:
@@ -913,6 +1102,8 @@ func interact() -> void:
 			if o.alive and o.global_position.distance_to(t.global_position) < 15.0 and o.sees:
 				o.alert(player.global_position, "saw")
 		hud.learn("takedown")
+		return
+	if use_target:
 		return
 	var p := interact_target()
 	if p == null:
@@ -947,7 +1138,11 @@ func _tick_pickups() -> void:
 	for p in facility.pickups:
 		if p.taken or not p.is_auto() or p.global_position.distance_to(player.global_position) > 1.3:
 			continue
-		if p.kind == Pickup.Kind.ROUNDS:
+		if p.kind == Pickup.Kind.BADGE:
+			has_badge = true
+			hud.toast("SECURITY BADGE  ·  ADMIN ACCESS")
+			hud.hint_event("badge")
+		elif p.kind == Pickup.Kind.ROUNDS:
 			var used := player.weapons.take_rounds(p.caliber, p.amount)
 			if used == 0:
 				continue
@@ -1015,6 +1210,8 @@ func on_soldier_killed(s: Soldier, headshot: bool, takedown: bool) -> void:
 	var side := Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5))
 	facility.place(Pickup.dropped_weapon(s.global_position + side, data, clampi(s.mag, 0, data.mag_size), []))
 	facility.place(Pickup.rounds(s.global_position - side * 0.6, data.caliber, s.profile.carried_rounds))
+	if s.carries_badge:
+		facility.add_pickup(Pickup.Kind.BADGE, s.global_position + Vector3(-0.3, 0, 0.3), 1, false)
 	if s.grenades > 0 and randf() < 0.6:
 		facility.add_pickup(Pickup.Kind.FRAG, s.global_position + Vector3(0.3, 0, 0.2), 1, false)
 	if not takedown:

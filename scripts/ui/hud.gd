@@ -20,6 +20,11 @@ var _toast := ""
 var _toast_t := 0.0
 var _banner := ""
 var _banner_t := 0.0
+var _feed_vp: SubViewport
+var _feed_cam: Camera3D
+var _feed_rect: TextureRect
+var _trace_reason := ""
+var _trace_t := 0.0
 
 var _f_small: FontVariation
 var _f_label: FontVariation
@@ -48,6 +53,24 @@ func _ready() -> void:
 	_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_flash_rect.color = Color(1, 1, 1, 0)
 	add_child(_flash_rect)
+	_feed_vp = SubViewport.new()
+	_feed_vp.size = Vector2i(640, 360)
+	_feed_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_feed_cam = Camera3D.new()
+	_feed_cam.fov = 70.0
+	_feed_cam.cull_mask = 1
+	_feed_vp.add_child(_feed_cam)
+	add_child(_feed_vp)
+	_feed_rect = TextureRect.new()
+	_feed_rect.texture = _feed_vp.get_texture()
+	_feed_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_feed_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_feed_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var fm := ShaderMaterial.new()
+	fm.shader = preload("res://shaders/cctv.gdshader")
+	_feed_rect.material = fm
+	_feed_rect.visible = false
+	add_child(_feed_rect)
 	_overlay = Control.new()
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -74,6 +97,11 @@ func learn(id: String) -> void:
 
 func hint_event(name: String) -> void:
 	hints.event(name)
+
+
+func trace_event(reason: String) -> void:
+	_trace_reason = "LOGGED: " + reason.to_upper()
+	_trace_t = 3.0
 
 
 func toast(text: String) -> void:
@@ -120,6 +148,15 @@ func refresh(dt: float) -> void:
 		if float(_dmg_dirs[i].t) <= 0.0:
 			_dmg_dirs.remove_at(i)
 	hints.update(dt)
+	_trace_t = maxf(0.0, _trace_t - dt)
+	var open := game.tablet_access != null
+	_feed_rect.visible = open
+	_feed_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if open else SubViewport.UPDATE_DISABLED
+	if open:
+		var cam := game.cameras()[game.tablet_cam]
+		_feed_cam.global_transform = cam.feed_transform()
+		var sig := 0.0 if cam.destroyed or cam.disabled else 1.0
+		(_feed_rect.material as ShaderMaterial).set_shader_parameter("signal", sig)
 	_fx_mat.set_shader_parameter("suppression", p.supp)
 	_fx_mat.set_shader_parameter("damage", _damage)
 	_fx_mat.set_shader_parameter("low_health", clampf((30.0 - p.hp) / 30.0, 0.0, 1.0) * 0.6 if p.alive else 0.0)
@@ -186,16 +223,20 @@ func _draw_overlay() -> void:
 	var c := size * 0.5
 	if p.is_scoped():
 		_draw_scope(size, c)
+	if game.tablet_access:
+		_draw_tablet(size)
 	_draw_compass(size)
 	_draw_markers()
-	if p.alive:
+	if p.alive and not game.tablet_access:
 		_draw_sights(c)
 		_draw_hack(c)
-	_draw_arcs(c)
+	if not game.tablet_access:
+		_draw_arcs(c)
 	_draw_vitals(size)
 	_draw_ammo(size)
 	_draw_prompts(size)
-	_draw_hint(size)
+	if not game.tablet_access:
+		_draw_hint(size)
 	for i in _subs.size():
 		var s: Dictionary = _subs[i]
 		var a := clampf(float(s.t) / 0.4, 0.0, 1.0)
@@ -279,27 +320,106 @@ func _draw_sights(c: Vector2) -> void:
 
 
 func _draw_hack(c: Vector2) -> void:
-	var h: Object = game.hack_target
-	if h:
-		var cam := game.player.camera
-		var wp: Vector3 = h.hack_point()
-		if not cam.is_position_behind(wp):
-			var sp := cam.unproject_position(wp)
-			var s := 13.0
-			var col := Color(Style.AMBER, 0.9)
-			for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
-				var o := sp + corner * s
-				_overlay.draw_line(o, o - Vector2(corner.x * 6.0, 0), col, 1.5)
-				_overlay.draw_line(o, o - Vector2(0, corner.y * 6.0), col, 1.5)
-		var prog := float(h.hack_progress)
+	var u := game.use_target
+	if u:
+		var prog: float = game.use_progress.get(u, 0.0)
 		if prog > 0.0:
 			_overlay.draw_arc(c, 26.0, 0.0, TAU, 48, Color(1, 1, 1, 0.15), 3.0)
 			_overlay.draw_arc(c, 26.0, -PI / 2.0, -PI / 2.0 + TAU * prog, 48, Style.AMBER, 3.0)
-			var name := "DOWNLOADING" if h is Device and h.kind == Device.Kind.LAPTOP else "HACKING " + str(h.hack_name()).to_upper()
-			_text(c + Vector2(0, 50), "%s  %d%%" % [name, roundi(prog * 100.0)], 13, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
-	if game.jam_t > 0.0:
-		var secs := ceili(game.jam_t)
-		_text(Vector2(_overlay.size.x * 0.5, 96), "COMMS JAMMED  %d:%02d" % [secs / 60, secs % 60], 13, Style.GREEN, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+			_text(c + Vector2(0, 50), "%s  %d%%" % [u.label, roundi(prog * 100.0)], 13, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+	var y := 96.0
+	var cx := _overlay.size.x * 0.5
+	var lap := _laptop()
+	if lap and lap.copy_state == "copying":
+		_text(Vector2(cx, y), "COPYING DATA  %d%%" % roundi(lap.copy_progress * 100.0), 13, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+		_overlay.draw_rect(Rect2(cx - 70, y + 6, 140, 2), Color(1, 1, 1, 0.15))
+		_overlay.draw_rect(Rect2(cx - 70, y + 6, 140 * lap.copy_progress, 2), Style.AMBER)
+		y += 22.0
+	if game.comms_down:
+		_text(Vector2(cx, y), "ENEMY COMMS DOWN", 13, Style.GREEN, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+		y += 18.0
+	if game.trace > 0.5 and not game.tablet_access:
+		_text(Vector2(cx, y), "NETWORK TRACE  %d%%" % roundi(game.trace), 13, Style.RED if game.trace > 70.0 else Style.DIM, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+
+
+func _laptop() -> Device:
+	for dv in game.facility.devices:
+		if dv.kind == Device.Kind.LAPTOP:
+			return dv
+	return null
+
+
+## The security tablet: camera list, the live feed, and what each action will cost you.
+func _draw_tablet(size: Vector2) -> void:
+	var cams := game.cameras()
+	var sel := cams[game.tablet_cam]
+	var w := minf(980.0, size.x - 80.0)
+	var h := w * 0.5
+	var r := Rect2((size.x - w) * 0.5, (size.y - h) * 0.5 - 70.0, w, h)
+	# the panel frames the feed; the feed itself is a separate node underneath this overlay
+	var outer := r.grow(14)
+	var fr := Rect2(r.position.x + 226.0, r.position.y, w - 226.0, h - 46.0)
+	var bg := Color(0.02, 0.03, 0.05, 0.92)
+	_overlay.draw_rect(Rect2(outer.position, Vector2(fr.position.x - outer.position.x, outer.size.y)), bg)
+	_overlay.draw_rect(Rect2(fr.end.x, outer.position.y, outer.end.x - fr.end.x, outer.size.y), bg)
+	_overlay.draw_rect(Rect2(fr.position.x, outer.position.y, fr.size.x, fr.position.y - outer.position.y), bg)
+	_overlay.draw_rect(Rect2(fr.position.x, fr.end.y, fr.size.x, outer.end.y - fr.end.y), bg)
+	_overlay.draw_rect(outer, Color(1, 1, 1, 0.12), false, 1.0)
+	var header := "SECURITY NETWORK  ·  %s  ·  %s" % [game.tablet_access.label, "ADMIN" if game.tablet_admin else "EXPLOIT SESSION"]
+	_text(r.position + Vector2(0, -22), header, 13, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+	var list_w := 210.0
+	for i in cams.size():
+		var cam := cams[i]
+		var row := Rect2(r.position.x, r.position.y + i * 42.0, list_w, 36)
+		var active := i == game.tablet_cam
+		if active:
+			_overlay.draw_rect(row, Color(1, 0.72, 0.29, 0.1))
+			_overlay.draw_rect(Rect2(row.position, Vector2(2, row.size.y)), Style.AMBER)
+		_text(row.position + Vector2(12, 23), cam.label, 15, Style.INK if active else Style.DIM)
+		var st := "LIVE"
+		var col := Style.INK
+		if cam.destroyed:
+			st = "NO SIGNAL"
+			col = Style.RED
+		elif cam.disabled:
+			st = "OFFLINE"
+			col = Style.RED
+		elif cam.looped > 0.0:
+			st = "LOOP %ds" % ceili(cam.looped)
+			col = Style.GREEN
+		elif cam.alarm:
+			st = "ALARM"
+			col = Style.RED
+		_text(row.position + Vector2(list_w - 10, 23), st, 12, col, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+	var feed := Rect2(r.position.x + list_w + 16, r.position.y, w - list_w - 16, h - 46)
+	_feed_rect.position = feed.position
+	_feed_rect.size = feed.size
+	_overlay.draw_rect(feed, Color(1, 1, 1, 0.15), false, 1.0)
+	var secs := int(game.time) + 7_380
+	_text(feed.position + Vector2(10, 20), "%s   02:%02d:%02d" % [sel.label, (secs / 60) % 60, secs % 60], 13, Color(1, 1, 1, 0.8), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+	if fmod(game.time, 1.0) < 0.5:
+		_overlay.draw_circle(feed.position + Vector2(feed.size.x - 16, 15), 4.0, Style.RED)
+	# trace
+	var ty := r.end.y - 30.0
+	_text(Vector2(r.position.x, ty + 4), "TRACE", 12, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+	var bar := Rect2(r.position.x + 60, ty - 4, w - 60, 4)
+	_overlay.draw_rect(bar, Color(1, 1, 1, 0.12))
+	_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * clampf(game.trace / 100.0, 0.0, 1.0), 4)), Style.RED if game.trace > 70.0 else Style.AMBER)
+	if _trace_t > 0.0:
+		_text(Vector2(r.end.x, ty + 18), _trace_reason, 12, Color(Style.RED, minf(1.0, _trace_t)), HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+	# actions, with what they cost
+	var rows := [[["lean_left", "lean_right"], "Camera"]]
+	if sel.camera_live():
+		rows.append([["interact"], "Loop feed  +12"])
+	if not sel.disabled and not sel.destroyed:
+		rows.append([["gadget_cycle"], "Disable  +25  ·  they'll send someone"])
+	if game.tablet_admin:
+		rows.append([["reload"], "Shut down all  +40"])
+	rows.append([["hack"], "Disconnect"])
+	var x := r.position.x
+	var py := r.end.y + 40.0
+	for row: Array in rows:
+		x += _prompt_row(Vector2(x, py), row[0], row[1], 1.0) + 26.0
 
 
 func _draw_arcs(c: Vector2) -> void:
@@ -324,7 +444,7 @@ func _draw_arcs(c: Vector2) -> void:
 		_overlay.draw_arc(c, 100.0, a - 0.16, a + 0.16, 12, Color(col, 0.18), 4.0)
 		_overlay.draw_arc(c, 100.0, a - 0.16 * amt, a + 0.16 * amt, 12, Color(col, 0.95), 4.0)
 	for dv in game.facility.devices:
-		if dv.kind != Device.Kind.CAMERA or dv.offline or dv.looped > 0.0:
+		if not dv.camera_live():
 			continue
 		var col2: Color
 		var amt2 := minf(1.0, dv.aware)
@@ -413,13 +533,18 @@ func _prompts() -> Array:
 	if p.drag_body:
 		out.append([["interact"], "Release to drop"])
 		return out
-	if game.hacking and game.hack_target:
-		out.append([["interact" if game.hack_target.is_physical() else "hack"], "Keep holding"])
+	if game.tablet_access:
 		return out
-	if game.hack_target:
-		var h: Object = game.hack_target
-		var verb := "Hold to download data" if h is Device and h.kind == Device.Kind.LAPTOP else "Hold to hack " + str(h.hack_name())
-		out.append([["interact" if h.is_physical() else "hack"], verb])
+	if game.using and game.use_target:
+		out.append([["interact"], "Keep holding"])
+		return out
+	if game.use_target and not game.takedown_target():
+		var u := game.use_target
+		var instant := u.use_time(game) <= 1.0
+		if u.can_use(game):
+			out.append([["interact"], u.use_label(game) + ("" if instant else "  ·  hold")])
+		else:
+			out.append([[], u.use_label(game)])
 	var t := game.takedown_target()
 	if t:
 		out.append([["interact"], "Takedown"])

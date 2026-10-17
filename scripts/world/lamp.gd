@@ -9,6 +9,9 @@ var energy := 1.0
 var light_range := 12.0
 var dead := false
 var flickers := false
+## Lighting circuit, switched at that zone's breaker panel.
+var zone := ""
+var powered := true
 var _flicker_t := 0.0
 
 
@@ -37,7 +40,7 @@ func setup(color: Color, p_energy: float, p_range: float, cool: bool, p_flickers
 
 
 func _process(delta: float) -> void:
-	if dead or not flickers:
+	if dead or not powered or not flickers:
 		return
 	_flicker_t -= delta
 	if _flicker_t <= 0.0:
@@ -48,7 +51,7 @@ func _process(delta: float) -> void:
 
 
 func is_lit() -> bool:
-	return not dead and light.light_energy > 0.0
+	return not dead and powered and light.light_energy > 0.0
 
 
 ## How much this lamp lights a point (0..1).
@@ -60,49 +63,20 @@ func contribution(p: Vector3) -> float:
 	return 0.0 if d > r else (1.0 - d / r)
 
 
-# ------------------------------------------------------------------ hackable interface
-
-var hack_progress := 0.0
-
-
-func hack_name() -> String:
-	return "light"
-
-
-func hack_time() -> float:
-	return 1.2
-
-
-func hack_range() -> float:
-	return 26.0
-
-
-func is_physical() -> bool:
-	return false
-
-
-func can_hack() -> bool:
-	return not dead
-
-
-func hack_point() -> Vector3:
-	return global_position
-
-
-func on_hacked(game: Game) -> void:
-	hack_progress = 0.0
-	power_off()
-	game.light_killed(self, false)
-
-
-## Silent: the fixture just dies.
+## Breaker cut: the circuit goes dark without a sound.
 func power_off() -> void:
-	if dead:
-		return
-	dead = true
-	light.light_energy = 0.0
+	powered = false
 	light.visible = false
 	fixture_mat.emission_energy_multiplier = 0.0
+
+
+func power_on() -> void:
+	powered = true
+	if dead:
+		return
+	light.visible = true
+	light.light_energy = energy
+	fixture_mat.emission_energy_multiplier = 6.0
 
 
 func shatter() -> void:

@@ -73,6 +73,9 @@ var corpse_check := 0.0
 var stuck_t := 0.0
 var stuck_pos := Vector3.ZERO
 var repath := 0.0
+## A job security sent this guard to do: walk to pos and work on device.
+var task: Dictionary = {}
+var carries_badge := false
 
 
 func setup(p_profile: SoldierProfile, p_squad: Squad, pos: Vector3, p_yaw: float, p_patrol: Array) -> void:
@@ -317,7 +320,11 @@ func tick(dt: float) -> void:
 			aim_err = 0.2
 	else:
 		_perceive(dt)
-		if game.player.alive:
+		if not task.is_empty() and state == State.COMBAT:
+			cancel_task()
+		if not task.is_empty() and game.player.alive:
+			_do_task(dt)
+		elif game.player.alive:
 			match state:
 				State.CALM: _calm(dt)
 				State.SUSPICIOUS: _suspicious(dt)
@@ -420,6 +427,50 @@ func _suspicious(dt: float) -> void:
 		else:
 			wait_t = 1.0
 			repath = 0.0
+
+
+func assign_task(pos: Vector3, device: Device, work: float) -> void:
+	task = {"pos": pos, "device": device, "work": work, "routed": false}
+	if device.kind != Device.Kind.LAPTOP:
+		say("repair")
+
+
+func cancel_task() -> void:
+	if task.is_empty():
+		return
+	(task.device as Device).repair_pending = false
+	task = {}
+
+
+func _do_task(dt: float) -> void:
+	var dv: Device = task.device
+	var pos: Vector3 = task.pos
+	crouch = false
+	if not task.routed:
+		go_to(pos)
+		task.routed = true
+	var flat := Vector2(pos.x - global_position.x, pos.z - global_position.z).length()
+	if flat > 1.3:
+		var dir := steer()
+		if dir == Vector3.ZERO:
+			dir = steer_to(pos)
+		ground_move(dir, profile.walk_speed * 1.4, dt)
+		if dir != Vector3.ZERO:
+			turn_to(yaw_of(dir), 3.0, dt)
+		return
+	ground_move(Vector3.ZERO, 0.0, dt)
+	face(dv.global_position, 3.0, dt)
+	task.work = float(task.work) - dt
+	if float(task.work) > 0.0:
+		return
+	task = {}
+	if dv.kind == Device.Kind.LAPTOP:
+		dv.repair_pending = false
+		dv.drive_pulled()
+		say("pulled", true)
+		alert(dv.global_position, "heard")
+	else:
+		dv.repaired(game)
 
 
 func flee(g: Gadget) -> void:
@@ -775,6 +826,7 @@ func die(dir: Vector3, headshot: bool, takedown: bool) -> void:
 	collision_layer = 0
 	collision_mask = Layers.WORLD
 	velocity = Vector3.ZERO
+	cancel_task()
 	if squad.flanker == self:
 		squad.flanker = null
 	if squad.searcher == self:

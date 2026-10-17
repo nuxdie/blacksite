@@ -199,7 +199,7 @@ func show_controls() -> void:
 		["move_forward", "Move (WASD)"], ["sprint", "Sprint · hold breath when scoped"], ["crouch", "Crouch"], ["crouch_hold", "Crouch while held"],
 		["jump", "Jump · vault"], ["lean_left", "Lean left"], ["lean_right", "Lean right"], ["aim", "Aim · aim over low cover"],
 		["fire", "Fire"], ["reload", "Reload"], ["fire_mode", "Fire mode"], ["primary", "Primary"], ["sidearm", "Sidearm"],
-		["hack", "Hack device (hold)"], ["gadget", "Equipment (hold, release)"], ["gadget_cycle", "Switch equipment"], ["interact", "Interact · takedown · drag"], ["mark", "Mark target"],
+		["hack", "Disconnect tablet"], ["gadget", "Equipment (hold, release)"], ["gadget_cycle", "Switch equipment"], ["interact", "Interact · takedown · drag"], ["mark", "Mark target"],
 	]
 	for r: Array in rows:
 		grid.add_child(Style.label(Settings.glyph(r[0]), 16, Style.INK, Style.semibold))

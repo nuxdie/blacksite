@@ -376,14 +376,52 @@ func _layout() -> void:
 	add_pickup(Pickup.Kind.AMMO, Vector3(-19, 0, -3.9))
 	add_pickup(Pickup.Kind.AMMO, Vector3(40.5, 4.2, 15))
 	box(-13.6, 0, -18.95, -11.4, 0.8, -18.35, "wood")
-	_device(Device.make(Device.Kind.TERMINAL, Vector3(-12.5, 0.8, -18.6), PI))
-	_device(Device.make(Device.Kind.LAPTOP, intel_pos))
-	_device(Device.make(Device.Kind.RELAY, Vector3(-26.5, 3.7, 29.0)))
-	_device(Device.camera(Vector3(9.6, 6.0, -12.0), PI / 2, 0.7))
-	_device(Device.camera(Vector3(-14.0, 3.0, -19.3), 0.3, 0.8))
-	_device(Device.camera(Vector3(47.5, 7.5, 0.0), PI / 2, 0.8, -0.45))
-	_device(Device.camera(Vector3(-0.5, 3.0, 21.2), PI / 2, 0.25, -0.2))
-	_device(Device.camera(Vector3(9.6, 6.0, 28.5), PI * 0.6, 0.6))
+	# security network: three access points and five cameras on the same wire
+	_device(Device.make(Device.Kind.ACCESS, "SECURITY TERMINAL", Vector3(-12.5, 0.8, -18.6), PI))
+	_device(Device.make(Device.Kind.ACCESS, "JUNCTION BOX", Vector3(32.0, 1.3, -20.34), 0.0))
+	_device(Device.make(Device.Kind.ACCESS, "SERVER CABINET", Vector3(-29.35, 0, 30.6), -PI / 2))
+	solid(-29.8, 0, 30.3, -28.95, 2.0, 30.9)
+	_device(Device.camera(1, Vector3(9.6, 6.0, -12.0), PI / 2, 0.7))
+	_device(Device.camera(2, Vector3(-14.0, 3.0, -19.3), 0.3, 0.8))
+	_device(Device.camera(3, Vector3(47.5, 7.5, 0.0), PI / 2, 0.8, -0.45))
+	_device(Device.camera(4, Vector3(-0.5, 3.0, 21.2), PI / 2, 0.25, -0.2))
+	_device(Device.camera(5, Vector3(9.6, 6.0, 28.5), PI * 0.6, 0.6))
+	# guard radio runs through one relay cabinet on the office roof
+	_device(Device.make(Device.Kind.RELAY, "COMMS RELAY", Vector3(-26.5, 3.7, 29.0)))
+	solid(-26.95, 3.7, 28.7, -26.05, 4.8, 29.3)
+	# lighting circuits, one breaker panel per zone
+	_device(Device.make(Device.Kind.BREAKER, "BREAKER", Vector3(-7.0, 1.3, -19.63), PI, "YARD"))
+	_device(Device.make(Device.Kind.BREAKER, "BREAKER", Vector3(10.33, 1.4, -8.0), -PI / 2, "WAREHOUSE"))
+	_device(Device.make(Device.Kind.BREAKER, "BREAKER", Vector3(-29.73, 1.4, 17.0), -PI / 2, "OFFICE"))
+	_device(Device.make(Device.Kind.BREAKER, "BREAKER", Vector3(-30.0, 1.3, -20.37), 0.0, "LOADING YARD"))
+	_device(Device.make(Device.Kind.LAPTOP, "LAPTOP", intel_pos))
+	for l in lamps:
+		l.zone = zone_of(l.position)
+
+
+func zone_of(p: Vector3) -> String:
+	if p.x > 10.0 and p.x < 48.0 and p.z > -20.0 and p.z < 30.0:
+		return "WAREHOUSE"
+	if p.x > -30.5 and p.x < 0.5 and p.z > 11.5 and p.z < 32.5:
+		return "OFFICE"
+	if p.z < -20.0:
+		return "LOADING YARD"
+	return "YARD"
+
+
+## Invisible collision that still shapes the navigation mesh.
+func solid(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float) -> void:
+	var body := StaticBody3D.new()
+	body.position = Vector3((x0 + x1) * 0.5, (y0 + y1) * 0.5, (z0 + z1) * 0.5)
+	body.collision_layer = Layers.WORLD
+	var cs := CollisionShape3D.new()
+	var sh := BoxShape3D.new()
+	sh.size = Vector3(absf(x1 - x0), y1 - y0, absf(z1 - z0))
+	cs.shape = sh
+	body.add_child(cs)
+	body.set_meta("mat", "metal")
+	body.set_meta("pen", 0.0)
+	nav_region.add_child(body)
 
 
 func _device(d: Device) -> void:
@@ -410,23 +448,10 @@ func bake_navigation() -> void:
 
 func reset_props() -> void:
 	for d in devices:
-		d.hack_progress = 0.0
-		d.hacked = false
-		d.offline = false
-		d.looped = 0.0
-		d.aware = 0.0
-		d.alarm = false
-		if d._cone:
-			d._cone.visible = true
-		if d._lens_mat:
-			d._lens_mat.emission_energy_multiplier = 1.5
-		if d.kind == Device.Kind.LAPTOP:
-			d._led_mat.emission = Color("40ff90")
-		elif d.kind == Device.Kind.TERMINAL:
-			d._led_mat.emission = Color("4ad0ff")
+		d.reset()
 	for l in lamps:
-		l.hack_progress = 0.0
 		l.dead = false
+		l.powered = true
 		l.light.visible = true
 		l.light.light_energy = l.energy
 		l.fixture_mat.emission_energy_multiplier = 6.0

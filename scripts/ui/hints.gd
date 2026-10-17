@@ -21,8 +21,10 @@ var defs: Array[Dictionary] = [
 	{"id": "aim", "keys": ["aim"], "text": "Aim down sights", "trigger": "enemy_visible"},
 	{"id": "mark", "keys": ["mark"], "text": "Mark a target — tracked through walls", "trigger": "calm_enemy_visible"},
 	{"id": "lights", "keys": [], "text": "You're lit up. Lamps can be shot out", "trigger": "lit_near_guards", "info": true},
-	{"id": "hack", "keys": ["hack"], "text": "Cameras radio in what they see. Aim at one and hold to loop its feed", "trigger": "camera_in_view"},
-	{"id": "relay", "keys": [], "text": "The comms relay on the office roof carries their radio. Jam it and alarms go nowhere", "trigger": "camera_alarm", "info": true},
+	{"id": "cameras", "keys": [], "text": "Cameras are wired to a security network — get to an access point to deal with them", "trigger": "camera_in_view", "info": true},
+	{"id": "network", "keys": [], "text": "Junction boxes, the server cabinet and the booth terminal all reach the camera network", "trigger": "access_near", "info": true},
+	{"id": "badge", "keys": [], "text": "A security badge logs you in cleanly — no trace", "trigger": "badge", "info": true},
+	{"id": "relay", "keys": [], "text": "Their radio runs through the relay on the office roof. Sabotage it and alarms go nowhere — until someone fixes it", "trigger": "camera_alarm", "info": true},
 	{"id": "lean", "keys": ["lean_left", "lean_right"], "text": "Lean out from cover", "trigger": "combat"},
 	{"id": "sprint", "keys": ["sprint"], "text": "Sprint — guards hear it", "trigger": "late_quiet"},
 	{"id": "gadget", "keys": ["gadget"], "text": "Hold to aim equipment, release to throw", "trigger": "gadget_time"},
@@ -105,11 +107,15 @@ func _condition(trigger: String) -> bool:
 			return _events.has("kill") and game.player.alive
 		"camera_in_view":
 			for dv in game.facility.devices:
-				if dv.kind == Device.Kind.CAMERA and dv.can_hack() and dv.global_position.distance_to(p.global_position) < 26.0 and (dv.global_position - p.eye_pos()).normalized().dot(p.view_dir()) > 0.8:
+				if dv.camera_live() and dv.global_position.distance_to(p.global_position) < 26.0 and (dv.global_position - p.eye_pos()).normalized().dot(p.view_dir()) > 0.8:
 					return true
 			return false
+		"access_near":
+			return game.use_target != null and game.use_target.kind == Device.Kind.ACCESS
+		"badge":
+			return _events.has("badge")
 		"camera_alarm":
-			return _events.has("camera_alarm") and game.jam_t <= 0.0
+			return _events.has("camera_alarm") and not game.comms_down
 		"penetrated":
 			return _events.has("penetrated")
 	return false

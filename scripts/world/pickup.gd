@@ -2,7 +2,7 @@ class_name Pickup
 extends Node3D
 ## Medkits, ammo crates, dropped weapons and loose rounds, grenades, and the objective drive.
 
-enum Kind { MEDKIT, AMMO, INTEL, ROUNDS, FRAG, WEAPON }
+enum Kind { MEDKIT, AMMO, INTEL, ROUNDS, FRAG, WEAPON, BADGE }
 
 var kind: Kind
 var amount := 1
@@ -44,7 +44,7 @@ func _ready() -> void:
 
 ## Collected by walking over it rather than by pressing interact.
 func is_auto() -> bool:
-	return kind == Kind.ROUNDS or kind == Kind.FRAG
+	return kind == Kind.ROUNDS or kind == Kind.FRAG or kind == Kind.BADGE
 
 
 func label() -> String:
@@ -89,6 +89,9 @@ func _build() -> void:
 			else:
 				_box(Vector3(0.16, 0.05, 0.06), dark, Vector3(0, 0.03, 0), Vector3(0, yaw, 0))
 				_box(Vector3(0.14, 0.05, 0.06), dark, Vector3(0.05, 0.03, 0.07), Vector3(0, yaw + 0.4, 0))
+		Kind.BADGE:
+			_box(Vector3(0.09, 0.005, 0.055), Mats.plain(Color("e8edf1"), 0.4), Vector3(0, 0.01, 0), Vector3(0, randf() * TAU, 0))
+			_box(Vector3(0.03, 0.006, 0.02), Mats.emissive(Color("4ad0ff"), 2.0), Vector3(0, 0.012, 0))
 		Kind.FRAG:
 			var mi := MeshInstance3D.new()
 			var sm := SphereMesh.new()

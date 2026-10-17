@@ -277,7 +277,7 @@ func animate(dt: float, p: Player, w: WeaponData, st: Weapons) -> void:
 		lower = maxf(lower, sin(st.throw_t / 0.45 * PI) * 0.25)
 	if p.drag_body:
 		lower = maxf(lower, 0.4)
-	if p.hacking:
+	if p.hacking or p.in_tablet:
 		lower = maxf(lower, 0.32)
 	if p.vault_t >= 0.0:
 		lower = maxf(lower, 0.3)

@@ -57,6 +57,8 @@ var holding_breath := false
 var drag_body: Soldier = null
 ## Set by the game while a hack is being held.
 var hacking := false
+## Working the security tablet: no moving, no looking around.
+var in_tablet := false
 var drag_snd := 0.0
 var vault_t := -1.0
 var vault_from := Vector3.ZERO
@@ -146,7 +148,7 @@ func speed_2d() -> float:
 
 
 func can_fire() -> bool:
-	return alive and active and not hacking and not sprinting and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
+	return alive and active and not hacking and not in_tablet and not sprinting and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
 
 
 func _ray(from: Vector3, to: Vector3) -> Dictionary:
@@ -175,6 +177,8 @@ func _can_stand() -> bool:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not active or not alive:
+		return
+	if in_tablet:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		mouse_delta += event.relative
@@ -225,8 +229,8 @@ func tick(dt: float) -> void:
 	viewmodel.sway += mouse_delta * 0.0004
 	mouse_delta = Vector2.ZERO
 
-	var f := Input.get_axis("move_back", "move_forward")
-	var s := Input.get_axis("move_left", "move_right")
+	var f := 0.0 if in_tablet else Input.get_axis("move_back", "move_forward")
+	var s := 0.0 if in_tablet else Input.get_axis("move_left", "move_right")
 	var wish := forward() * f + right() * s
 	if wish.length() > 1.0:
 		wish = wish.normalized()
