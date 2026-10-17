@@ -512,6 +512,13 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 				if t2 >= 0.0 and t2 < lt:
 					best = {"t": t2, "lamp": l}
 					lt = t2
+			for c in cameras():
+				if c.destroyed:
+					continue
+				var t3 := Ballistics.ray_sphere(oo, dd, c.head.global_position, 0.2)
+				if t3 >= 0.0 and t3 < lt:
+					best = {"t": t3, "camera": c}
+					lt = t3
 			return best,
 		func(pt: Vector3, n: Vector3, is_exit: bool, mat: String) -> void:
 			fx.hole(pt, n)
@@ -545,6 +552,14 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 		return
 	if tgt.has("lamp"):
 		_break_lamp(tgt.lamp)
+		return
+	if tgt.has("camera"):
+		var cam: Device = tgt.camera
+		cam.shoot_out()
+		fx.burst("spark", cam.head.global_position)
+		# a feed that suddenly dies gets noticed in the security office
+		if not comms_down:
+			_dispatch(NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, cam.global_position), "investigate", 1)
 		return
 	if not _shot_hit:
 		stats.hits += 1

@@ -367,6 +367,16 @@ func _autotest() -> void:
 	Input.action_release("interact")
 	await _frames(5)
 	hk["mission"] = game.mission
+	await _fresh("carbine")
+	var shot_cam: Device = game.cameras()[0]
+	game.player.global_position = Vector3(-2, 0, -12)
+	await _frames(5)
+	Input.action_press("aim")
+	await _frames(30)
+	_look_at(shot_cam.head.global_position)
+	await _fire(12)
+	Input.action_release("aim")
+	hk["camera_shot_out"] = shot_cam.destroyed
 	r["security"] = hk
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
