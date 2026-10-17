@@ -6,7 +6,7 @@
 script = ExtResource("1")
 id = "carbine"
 display_name = "MK4 CARBINE"
-description = "Full-auto 5.56. Reliable at any range and punches through thin walls. Loud."
+description = "Full-auto 5.56 with a red dot. Reliable at any range, punches through thin walls. Loud."
 mag_size = 30
 spare_mags = 4
 rpm = 660.0

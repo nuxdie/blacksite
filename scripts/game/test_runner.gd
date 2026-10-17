@@ -123,8 +123,11 @@ func _autotest() -> void:
 	e.crouch_k = 1.0
 	game.player.global_position = Vector3(-12, 0, -10)
 	await _frames(3)
+	Input.action_press("aim")
+	await _frames(40)
 	_look_at(Vector3(-12, 0.6, -1.4))
 	await _fire(3)
+	Input.action_release("aim")
 	r["concrete_stops_dmr"] = {"hp": roundi(e.hp)}
 	# suppressed kill: a guard 8 m away stays calm
 	await _fresh("smg")

@@ -12,8 +12,6 @@ var _fx_mat: ShaderMaterial
 var _flash_rect: ColorRect
 var _overlay: Control
 var _damage := 0.0
-var _hit_t := 0.0
-var _hit_kill := false
 var _dmg_dirs: Array[Dictionary] = []
 var _subs: Array[Dictionary] = []
 var _toast := ""
@@ -124,13 +122,6 @@ func subtitle(who: String, text: String) -> void:
 		_subs.pop_front()
 
 
-func hitmarker(kill: bool) -> void:
-	_hit_t = 0.35 if kill else 0.15
-	_hit_kill = kill
-	if kill:
-		Sfx.play("kill", -6.0)
-
-
 func on_damage(amount: float, from: Vector3) -> void:
 	_damage = minf(1.0, _damage + amount / 25.0)
 	_dmg_dirs.append({"pos": from, "t": 1.6})
@@ -140,7 +131,6 @@ func refresh(dt: float) -> void:
 	var p := game.player
 	_damage = maxf(0.0, _damage - dt * 1.2)
 	flash = maxf(0.0, flash - dt * 0.45)
-	_hit_t = maxf(0.0, _hit_t - dt)
 	_toast_t = maxf(0.0, _toast_t - dt)
 	_banner_t = maxf(0.0, _banner_t - dt)
 	for i in range(_subs.size() - 1, -1, -1):
@@ -300,36 +290,46 @@ func _draw_compass(size: Vector2) -> void:
 	_text(Vector2(cx - (lw + dw) * 0.5 + lw, y + 44), dtxt, 14, Style.AMBER)
 
 
+## Marked guards: live while you can see them, otherwise a hollow marker where you last saw them.
 func _draw_markers() -> void:
 	var cam := game.player.camera
+	var eye := game.player.eye_pos()
 	for s in game.soldiers:
 		if not s.alive or not s.tagged:
 			continue
-		var wp := s.global_position + Vector3.UP * 2.05
+		var live := game.los(eye, s.head_pos())
+		if live:
+			s.tag_seen = s.global_position
+			s.tag_seen_t = game.time
+		var age := game.time - s.tag_seen_t
+		var a := 1.0 if live else clampf(1.0 - (age - 10.0) / 10.0, 0.0, 0.7)
+		if a <= 0.0:
+			continue
+		var wp := s.tag_seen + Vector3.UP * 2.05
 		if cam.is_position_behind(wp):
 			continue
 		var sp := cam.unproject_position(wp)
 		var col := Style.RED if s.state == Soldier.State.COMBAT else (Style.AMBER if s.state == Soldier.State.SUSPICIOUS else Style.INK)
-		_overlay.draw_colored_polygon(PackedVector2Array([sp + Vector2(0, -6), sp + Vector2(5, 0), sp + Vector2(0, 6), sp + Vector2(-5, 0)]), col)
-		_text(sp + Vector2(0, -10), "%dm" % roundi(s.global_position.distance_to(game.player.global_position)), 11, Color(col, 0.85), HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+		var pts := PackedVector2Array([sp + Vector2(0, -6), sp + Vector2(5, 0), sp + Vector2(0, 6), sp + Vector2(-5, 0)])
+		if live:
+			_overlay.draw_colored_polygon(pts, Color(col, a))
+		else:
+			pts.append(pts[0])
+			_overlay.draw_polyline(pts, Color(Style.DIM, a), 1.5)
+		var label := "%dm" % roundi(s.tag_seen.distance_to(game.player.global_position))
+		if not live:
+			label = "LAST SEEN  " + label
+		_text(sp + Vector2(0, -10), label, 11, Color(col if live else Style.DIM, 0.85 * a), HORIZONTAL_ALIGNMENT_CENTER, _f_small)
 
 
+## No crosshair: at the hip there is only a faint dot where the eye rests; aiming uses the
+## weapon's own sights.
 func _draw_sights(c: Vector2) -> void:
 	var p := game.player
 	var w := p.weapons
-	var hidden := p.ads > 0.5 or p.sprinting or w.aiming_throw or w.reload_t > 0.0 or p.drag_body != null or p.vault_t >= 0.0
-	if not hidden:
-		var cur := w.current()
-		var spread := cur.hip_spread + clampf(p.speed_2d() / Player.WALK, 0.0, 1.5) * 0.03 + p.bloom + (0.0 if p.is_on_floor() else 0.06)
-		var gap := 4.0 + spread * _overlay.size.y / (2.0 * tan(deg_to_rad(p.camera.fov / 2.0)))
-		var col := Color(1, 1, 1, 0.85)
-		for d: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
-			_overlay.draw_line(c + d * gap, c + d * (gap + 8.0), col, 2.0)
-		_overlay.draw_rect(Rect2(c - Vector2(1, 1), Vector2(2, 2)), col)
-	if _hit_t > 0.0:
-		var col2 := Style.RED if _hit_kill else Color.WHITE
-		for d: Vector2 in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
-			_overlay.draw_line(c + d.normalized() * 6.0, c + d.normalized() * 13.0, col2, 3.0 if _hit_kill else 2.0)
+	if p.ads > 0.2 or p.sprinting or w.aiming_throw or w.reload_t > 0.0 or p.drag_body != null or p.vault_t >= 0.0 or p.bandage_t >= 0.0:
+		return
+	_overlay.draw_circle(c, 1.5, Color(1, 1, 1, 0.35 * (1.0 - p.ads * 5.0)))
 
 
 func _draw_hack(c: Vector2) -> void:

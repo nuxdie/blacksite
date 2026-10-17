@@ -22,9 +22,10 @@ scenes/                  main, player, soldier
 scripts/core/            Settings (autoload), Sfx (autoload) + Synth, physics layers
 scripts/world/           Facility (level, lighting, navmesh), Lamp, Pickup, Mats (materials + penetration table)
 scripts/combat/          WeaponData resource, Ballistics (penetrating hitscan), Gadget (thrown equipment)
-scripts/player/          Player (movement, stance, lean, vault, damage), Weapons (mags, fire, throw), ViewModel
+scripts/player/          Player (movement, stance, lean, vault, wounds), Weapons (mags, chamber, fire, throw),
+                         GunModels (procedural guns built around their sight lines), ViewModel (animation)
 scripts/ai/              Soldier (perception + behaviour), SoldierModel, SoldierProfile resource, Squad, Cover
-scripts/game/            Game (mission flow and shared rules), TestRunner
+scripts/game/            Game (mission flow and shared rules), Command (HQ: alert level, radio checks, alarm), TestRunner
 scripts/ui/              Hud, Hints (contextual teaching), Menu, Style
 shaders/                 procedural world surfaces, night sky, screen stress effects
 resources/weapons/       carbine, smg, dmr, pistol (.tres — tune here)
@@ -33,6 +34,13 @@ assets/fonts/            Rajdhani (SIL OFL, see OFL.txt)
 ```
 
 ## Systems at a glance
+
+- **Insertion**: you start outside the west wall and go in through a breach; extraction is back out the same hole.
+- **Sights**: no crosshair. Each gun is modelled so its sight line is exact: red dot (MK4), holographic ring (K7), 3-dot tritium night sights (P9), AK notch and post, LMG peep, shotgun bead, and a 4x scope whose eye-box shadow drifts when you move or breathe.
+- **Weapon handling**: closed-bolt guns keep one in the chamber on a tactical reload (30+1); empty reloads need the bolt worked. The pistol slide locks back empty. The shotgun is pumped after every shot and loads shell by shell; firing stops the reload.
+- **Wounds**: nothing regenerates. Hits bleed until you bandage (T); a leg hit stops you running until a medkit splints it.
+- **Consequences**: HQ runs the radio net. Guards check in every ~95 s, and a dead guard (hidden or not) doesn't answer, so HQ sends people to their post and the site goes to *caution* for the rest of the night (sharper eyes, flashlights, longer searches, scanning posts). A spotted intruder that gets radioed in raises the *alarm*: siren, the nearest guards sent, and a reaction force 70 s later. Kill the spotter before the call goes out (about 3 s), or take the relay down, and HQ never hears it. Without radios, guards still shout to anyone in earshot. Guards walk back to their posts after a search and limp after leg hits.
+- **Marking**: a marked guard is tracked only while you can see them; otherwise you keep where you last saw them.
 
 - **Stealth**: guards build awareness from distance, light (lamps, moonlight, their own flashlights), your stance, movement and exposure. Lamps can be shot out. Bodies are found by sight, and bodies in the dark only up close.
 - **Squads**: shared last-known position; cover selection with peeking, suppressive fire, a designated flanker, grenades against campers, sound-based tracking, staged searches.

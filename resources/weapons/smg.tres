@@ -6,7 +6,7 @@
 script = ExtResource("1")
 id = "smg"
 display_name = "K7 SD"
-description = "Integrally suppressed. Only heard up close. Precise near, weak at range and against cover."
+description = "Integrally suppressed, holographic sight. Only heard up close. Precise near, weak at range and against cover."
 mag_size = 30
 spare_mags = 4
 rpm = 880.0

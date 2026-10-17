@@ -90,7 +90,7 @@ func show_title() -> void:
 	_clear()
 	_title("BLACKSITE")
 	_tag("ONE OPERATOR  ·  ONE NIGHT")
-	var brief := Style.label("Recover the drive from the warehouse office and get back to the loading yard. They don't know you're here.", 17, Style.INK)
+	var brief := Style.label("Go in through the breach in the west wall, copy the drive in the warehouse office, and leave the way you came. They don't know you're here — yet.", 17, Style.INK)
 	brief.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_panel.add_child(brief)
 	_spacer(6)

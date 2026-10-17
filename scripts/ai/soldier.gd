@@ -68,6 +68,9 @@ var acquire_t := -9.0
 var death_t := 0.0
 var fall_side := 0.0
 var tagged := false
+## Where a marked guard was last seen by the player, and when.
+var tag_seen := Vector3.ZERO
+var tag_seen_t := -99.0
 var corpse_found := false
 var corpse_check := 0.0
 var stuck_t := 0.0

@@ -19,7 +19,7 @@ var defs: Array[Dictionary] = [
 	{"id": "crouch", "keys": ["crouch"], "text": "Crouch — slower, quieter, harder to spot", "trigger": "noticed_or_late"},
 	{"id": "awareness", "keys": [], "text": "Arcs around your sights show who is noticing you", "trigger": "noticed", "info": true},
 	{"id": "aim", "keys": ["aim"], "text": "Aim down sights", "trigger": "enemy_visible"},
-	{"id": "mark", "keys": ["mark"], "text": "Mark a target — tracked through walls", "trigger": "calm_enemy_visible"},
+	{"id": "mark", "keys": ["mark"], "text": "Mark a target — you keep their last seen position", "trigger": "calm_enemy_visible"},
 	{"id": "lights", "keys": [], "text": "You're lit up. Lamps can be shot out", "trigger": "lit_near_guards", "info": true},
 	{"id": "cameras", "keys": [], "text": "Cameras are wired to a security network — get to an access point to deal with them", "trigger": "camera_in_view", "info": true},
 	{"id": "network", "keys": [], "text": "Junction boxes, the server cabinet and the booth terminal all reach the camera network", "trigger": "access_near", "info": true},

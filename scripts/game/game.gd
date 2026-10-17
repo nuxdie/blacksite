@@ -589,14 +589,8 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 		if s.profile.helmet < 1.0:
 			Sfx.play_at("helmet", end, 0.0, false)
 	Sfx.play_at("flesh", end, 0.0, false)
-	Sfx.play("hit_head" if zone == "head" else "hit", -6.0)
 	fx.burst("blood", end, -d)
 	s.take_hit(w.damage * mul, d, zone, true, w.suppressed)
-	hud.hitmarker(not s.alive)
-	if not s.alive and int(res.pens) > 0:
-		hud.toast("THROUGH COVER")
-	elif not s.alive and zone == "head":
-		hud.toast("HEADSHOT")
 
 
 func _break_lamp(l: Lamp) -> void:
@@ -1246,8 +1240,9 @@ func mark_target() -> void:
 			best = s
 	if best:
 		best.tagged = true
+		best.tag_seen = best.global_position
+		best.tag_seen_t = time
 		Sfx.play("tag")
-		hud.toast("MARKED — " + best.profile.display_name)
 
 
 func on_soldier_killed(s: Soldier, headshot: bool, takedown: bool) -> void:
