@@ -1,7 +1,7 @@
 name: Release
 
-# A tag like v0.3.0 builds the Linux export and attaches it to a GitHub release of the same name.
-# "Run workflow" from the Actions tab builds the same thing from any branch as a downloadable artifact.
+# A tag like v0.3.0 exports Linux, Windows and macOS builds and attaches them to a GitHub release of
+# the same name. "Run workflow" from the Actions tab builds the same from any branch as an artifact.
 on:
   push:
     tags: ["v*"]
@@ -14,8 +14,8 @@ env:
   GODOT_VERSION: 4.7.2
 
 jobs:
-  linux:
-    name: Linux x86_64
+  build:
+    name: Linux, Windows and macOS
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
           path: |
             ~/godot
             ~/.local/share/godot/export_templates
-          key: godot-${{ env.GODOT_VERSION }}-linux
+          key: godot-${{ env.GODOT_VERSION }}-linux-windows-macos
 
       - name: Download Godot and export templates
         if: steps.cache.outputs.cache-hit != 'true'
@@ -41,7 +41,10 @@ jobs:
           chmod +x ~/godot/godot
           curl -fsSL -o /tmp/templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
           mkdir -p ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
-          unzip -q /tmp/templates.tpz 'templates/linux_release.x86_64' 'templates/linux_debug.x86_64' -d /tmp/tpl
+          unzip -q /tmp/templates.tpz 'templates/linux_release.x86_64' 'templates/linux_debug.x86_64' \
+            'templates/windows_release_x86_64.exe' 'templates/windows_debug_x86_64.exe' \
+            'templates/windows_release_x86_64_console.exe' 'templates/windows_debug_x86_64_console.exe' \
+            'templates/macos.zip' -d /tmp/tpl
           mv /tmp/tpl/templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
 
       - name: Import project
@@ -50,9 +53,20 @@ jobs:
       - name: Export
         run: |
           set -eu
-          mkdir -p build/linux
+          mkdir -p build/linux build/windows build/macos
           ~/godot/godot --headless --path . --export-release "Linux" build/linux/blacksite.x86_64
-          test -x build/linux/blacksite.x86_64
+          ~/godot/godot --headless --path . --export-release "Windows" build/windows/blacksite.exe
+          ~/godot/godot --headless --path . --export-release "macOS" build/macos/Blacksite.zip
+          test -x build/linux/blacksite.x86_64 && test -s build/windows/blacksite.exe && test -s build/macos/Blacksite.zip
+
+      - name: Smoke test the Linux export
+        run: |
+          set -eu
+          cd build/linux
+          timeout 900 ./blacksite.x86_64 --headless -- --autotest > autotest.log 2>&1 || echo "exit code $? (checked by content below)"
+          grep '^AUTOTEST ' autotest.log | grep -q '"voice_ok":true'
+          ! grep -q 'SCRIPT ERROR' autotest.log
+          rm -f autotest.log
 
       - name: Package
         id: pkg
@@ -60,38 +74,32 @@ jobs:
           set -eu
           ver="${GITHUB_REF_NAME}"
           case "$ver" in v*) ;; *) ver="dev-$(git rev-parse --short HEAD)";; esac
-          name="blacksite-${ver}-linux-x86_64"
-          mkdir -p "dist/$name/assets"
-          cp build/linux/blacksite.x86_64 "dist/$name/blacksite"
-          # the voice takes are plain files the game reads from beside the binary (assets/voice is .gdignore'd)
-          cp -r assets/voice "dist/$name/assets/voice"
-          rm -f "dist/$name/assets/voice/.gdignore"
-          cp README.md "dist/$name/"
-          printf 'Run ./blacksite (keep the assets folder next to it: it holds the voices).\n\nFirst launch synthesizes the sound bank (a few seconds).\nSettings and quicksaves live under ~/.local/share/godot/app_userdata/Blacksite/\n' > "dist/$name/RUN.txt"
-          echo "dir=dist/$name" >> "$GITHUB_OUTPUT"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
+          base="blacksite-${ver}"
+          mkdir -p dist
+          # Linux: a single binary with the data embedded
+          d="dist/$base-linux-x86_64"; mkdir -p "$d"
+          cp build/linux/blacksite.x86_64 "$d/blacksite"
+          cp README.md "$d/"
+          printf 'Run ./blacksite\n\nFirst launch synthesizes the sound bank (a few seconds).\nSettings and quicksaves: ~/.local/share/godot/app_userdata/Blacksite/\n' > "$d/RUN.txt"
+          (cd dist && tar -czf "$base-linux-x86_64.tar.gz" "$base-linux-x86_64")
+          # Windows: a single exe, unsigned (SmartScreen will ask once)
+          d="dist/$base-windows-x86_64"; mkdir -p "$d"
+          cp build/windows/blacksite.exe "$d/blacksite.exe"
+          cp README.md "$d/"
+          printf 'Run blacksite.exe\r\n\r\nThe exe is not code-signed, so SmartScreen may ask once: More info > Run anyway.\r\nFirst launch synthesizes the sound bank (a few seconds).\r\nSettings and quicksaves: %%APPDATA%%\\Godot\\app_userdata\\Blacksite\\\r\n' > "$d/RUN.txt"
+          (cd dist && zip -qr "$base-windows-x86_64.zip" "$base-windows-x86_64")
+          # macOS: the universal app bundle, ad-hoc signed, not notarized
+          cp build/macos/Blacksite.zip "dist/$base-macos-universal.zip"
+          ls -la dist/*.tar.gz dist/*.zip
+          echo "base=$base" >> "$GITHUB_OUTPUT"
 
-      - name: Smoke test the packaged build
-        run: |
-          set -eu
-          cd "${{ steps.pkg.outputs.dir }}"
-          timeout 900 ./blacksite --headless -- --autotest > autotest.log 2>&1 || echo "exit code $? (checked by content below)"
-          grep '^AUTOTEST ' autotest.log | grep -q '"voice_ok":true'
-          ! grep -q 'SCRIPT ERROR' autotest.log
-          rm -f autotest.log
-
-      - name: Archive
-        id: tar
-        run: |
-          set -eu
-          (cd dist && tar -czf "${{ steps.pkg.outputs.name }}.tar.gz" "${{ steps.pkg.outputs.name }}")
-          echo "archive=dist/${{ steps.pkg.outputs.name }}.tar.gz" >> "$GITHUB_OUTPUT"
-
-      - name: Upload build artifact
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.pkg.outputs.name }}
-          path: ${{ steps.tar.outputs.archive }}
+          name: ${{ steps.pkg.outputs.base }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -101,7 +109,7 @@ jobs:
           set -eu
           tag="${GITHUB_REF_NAME}"
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${{ steps.tar.outputs.archive }}" --clobber
+            gh release upload "$tag" dist/*.tar.gz dist/*.zip --clobber
           else
-            gh release create "$tag" "${{ steps.tar.outputs.archive }}" --title "Blacksite $tag" --generate-notes
+            gh release create "$tag" dist/*.tar.gz dist/*.zip --title "Blacksite $tag" --generate-notes
           fi

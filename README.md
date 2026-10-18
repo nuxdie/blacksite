@@ -34,9 +34,17 @@ It is slow and lethal. Guards build awareness from light, distance, movement and
 
 ## Download
 
-Linux x86_64 builds are on the [releases page](https://github.com/nuxdie/blacksite/releases/latest). Unpack and run `./blacksite`. The first launch synthesizes the sound bank, which takes a few seconds. Settings and quicksaves live under `~/.local/share/godot/app_userdata/Blacksite/`.
+Builds for all three desktop platforms are on the [releases page](https://github.com/nuxdie/blacksite/releases/latest):
 
-Every tag that starts with `v` is built by GitHub Actions ([release.yml](.github/workflows/release.yml)) from a clean checkout: it downloads Godot and the export templates, exports the Linux preset, runs the in-engine autotest against the exported binary, and attaches the archive to the release. Every push to `main` runs the same autotest ([test.yml](.github/workflows/test.yml)).
+| Platform | File | Notes |
+| --- | --- | --- |
+| Linux x86_64 | `blacksite-<version>-linux-x86_64.tar.gz` | Unpack and run `./blacksite`. |
+| Windows x86_64 | `blacksite-<version>-windows-x86_64.zip` | Unpack and run `blacksite.exe`. The exe is not code-signed, so SmartScreen may ask once (More info, Run anyway). |
+| macOS (universal) | `blacksite-<version>-macos-universal.zip` | Unpack and open `Blacksite.app`. The app is ad-hoc signed and not notarized, so the first launch is right-click, Open; or run `xattr -cr Blacksite.app` once. |
+
+The first launch synthesizes the sound bank, which takes a few seconds. Settings and quicksaves live in Godot's user data folder for the app (`~/.local/share/godot/app_userdata/Blacksite/` on Linux, `%APPDATA%\Godot\app_userdata\Blacksite\` on Windows, `~/Library/Application Support/Godot/app_userdata/Blacksite/` on macOS).
+
+Every tag that starts with `v` is built by GitHub Actions ([release.yml](.github/workflows/release.yml)) from a clean checkout: it downloads Godot and the export templates, exports the three presets, runs the in-engine autotest against the Linux export, and attaches the archives to the release. Every push to `main` runs the same autotest ([test.yml](.github/workflows/test.yml)).
 
 ## Screenshots
 
@@ -96,7 +104,8 @@ assets/voice/            lines.json (every spoken line) and the rendered takes, 
 tools/voices/            render.py: regenerates assets/voice with Piper (see below)
 tools/media/             banner.py (logo and banner) and build.sh (README stills and GIFs from a --media capture)
 docs/media/              the images this README shows
-.github/workflows/       test.yml runs the autotest on every push; release.yml builds the Linux export for tags
+addons/voice_pack/       export plugin that packs the .gdignore'd voice folder into every build
+.github/workflows/       test.yml runs the autotest on every push; release.yml builds all three platforms for tags
 ```
 
 ## Interface
@@ -171,10 +180,12 @@ Test runs never write to your saved settings.
 
 ## Building
 
-The Linux export preset is in `export_presets.cfg`. With the 4.7.2 export templates installed:
+The export presets (Linux, Windows Desktop, macOS) are in `export_presets.cfg`. With the 4.7.2 export templates installed:
 
 ```sh
 $GODOT --headless --path . --export-release "Linux" build/linux/blacksite.x86_64
+$GODOT --headless --path . --export-release "Windows" build/windows/blacksite.exe
+$GODOT --headless --path . --export-release "macOS" build/macos/Blacksite.zip
 ```
 
-The voice takes under `assets/voice` are kept out of Godot's import (the folder is `.gdignore`'d, so the editor doesn't churn through four hundred files) and are therefore not inside the exported pack. The game looks for them next to the executable when they are missing from `res://`, so a shipped build is the binary plus an `assets/voice` folder beside it, which is what the release workflow packages. Other platforms have no preset yet; adding one is a matter of a new entry in `export_presets.cfg` and a matching job in the release workflow.
+All three export from Linux. The voice takes under `assets/voice` are kept out of Godot's import (the folder is `.gdignore`'d, so the editor doesn't churn through a thousand files), which would also keep them out of exports; the `addons/voice_pack` export plugin adds them to every pack as raw files at their `res://` paths, so a shipped build is a single executable (or app bundle). Windows builds are unsigned and macOS builds are ad-hoc signed; proper signing and notarization would need certificates in the workflow's secrets.
