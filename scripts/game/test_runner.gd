@@ -595,8 +595,9 @@ func _ui_shots(dir: String) -> void:
 	game.god_mode = false
 	game.player.take_damage(28.0, g.global_position, false, "legs")
 	g.alert(game.player.global_position, "saw")
-	game.hq.raise_alarm(game.player.global_position)
 	game.god_mode = true
+	await get_tree().create_timer(0.3).timeout
+	_snap(dir + "/ui_calling.png")
 	await get_tree().create_timer(1.2).timeout
 	_snap(dir + "/ui_combat.png")
 	# reloading
@@ -629,6 +630,23 @@ func _ui_shots(dir: String) -> void:
 	await get_tree().create_timer(0.3).timeout
 	_snap(dir + "/ui_pause.png")
 	game.resume()
+	# guards up close: the three types side by side, calm and alert
+	await _fresh("carbine")
+	_isolate([])
+	var lineup := [_find("yard", -10.0), _find("wh", 28.0), _find("office", -27.0)]
+	for i in lineup.size():
+		var u: Soldier = lineup[i]
+		u.alive = true
+		u.visible = true
+		u.global_position = Vector3(-14.0 + i * 1.6, 0, -6.0)
+		u.yaw = 0.0
+		u.patrol.clear()
+		u.post = u.global_position
+		u.state = Soldier.State.CALM if i != 1 else Soldier.State.COMBAT
+	game.player.global_position = Vector3(-12.4, 0, -11.0)
+	_look_at(Vector3(-12.4, 1.1, -6.0))
+	await get_tree().create_timer(0.6).timeout
+	_snap(dir + "/ui_guards.png")
 
 
 ## Hip and aimed views of every weapon against the same backdrop.

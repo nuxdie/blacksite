@@ -19,6 +19,9 @@ const FOV := 74.0
 const BREATH := 4.0
 const MAX_HP := 100.0
 const BANDAGE_TIME := 3.2
+## You wear the same kit they do: a plate carrier and a bump helmet that won't stop a rifle round.
+const ARMOR := 0.8
+const HELMET := 1.0
 
 @onready var col: CollisionShape3D = $Collision
 @onready var head: Node3D = $Head

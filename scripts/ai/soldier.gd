@@ -12,6 +12,8 @@ const GRAVITY := 20.0
 @onready var model: SoldierModel = $Model
 
 var profile: SoldierProfile
+## The firearm they carry: their rounds follow the same rules as yours.
+var weapon: WeaponData
 var squad: Squad
 var game: Game
 var alive := true
@@ -88,13 +90,16 @@ var post_yaw := 0.0
 var accounted := false
 ## A hit to the legs slows them for good.
 var limp := 1.0
+## Seconds left on a radio call to HQ (hand on the radio); killing them now stops it.
+var radio_t := 0.0
 
 
 func setup(p_profile: SoldierProfile, p_squad: Squad, pos: Vector3, p_yaw: float, p_patrol: Array) -> void:
 	profile = p_profile
 	squad = p_squad
 	hp = profile.health
-	mag = profile.mag_size
+	weapon = load("res://resources/weapons/%s.tres" % profile.weapon_id)
+	mag = weapon.mag_size
 	grenades = profile.grenades
 	position = pos
 	post = pos
@@ -325,6 +330,7 @@ func tick(dt: float) -> void:
 		return
 	anim += dt
 	voice_t -= dt
+	radio_t = maxf(0.0, radio_t - dt)
 	flinch -= dt
 	supp = maxf(0.0, supp - dt * (0.6 if profile.id == "heavy" else 0.35))
 	if blind > 0.0:
@@ -547,7 +553,7 @@ func _try_shoot(dt: float, target: Vector3, extra := 0.0, suppressive := false) 
 	mag -= 1
 	game.soldier_shot(self, target, extra, suppressive)
 	burst -= 1
-	shot_t = profile.fire_interval * randf_range(0.9, 1.15) if burst > 0 else randf_range(profile.pause_min, profile.pause_max)
+	shot_t = 60.0 / weapon.rpm * randf_range(1.0, 1.3) if burst > 0 else randf_range(profile.pause_min, profile.pause_max)
 	return true
 
 
@@ -561,7 +567,7 @@ func _combat(dt: float) -> void:
 	if reloading > 0.0:
 		reloading -= dt
 		if reloading <= 0.0:
-			mag = profile.mag_size
+			mag = weapon.mag_size
 			burst = 0
 	if sees:
 		if not had_sight and game.time - acquire_t > 2.5:

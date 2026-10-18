@@ -36,6 +36,7 @@ var defs: Array[Dictionary] = [
 	{"id": "leg_wound", "keys": [], "text": "Leg wound: you can't run until a medkit splints it", "trigger": "leg_wound", "info": true},
 	{"id": "checkin", "keys": [], "text": "Guards check in by radio. A dead guard can't answer — HQ will send someone to their post", "trigger": "checkin", "info": true},
 	{"id": "caution", "keys": [], "text": "The site is on caution now: sharper eyes, flashlights on. It won't calm down tonight", "trigger": "caution", "info": true},
+	{"id": "radio_call", "keys": [], "text": "A guard is calling you in. Drop them before the call goes through", "trigger": "radio_call", "info": true},
 	{"id": "alarm", "keys": [], "text": "Alarm raised — a reaction force is on its way. Kill a guard before they radio it in and it never happens", "trigger": "alarm", "info": true},
 	{"id": "penetrated", "keys": [], "text": "Thin walls don't stop rifle rounds — get behind concrete or steel", "trigger": "penetrated", "info": true},
 ]
@@ -116,6 +117,8 @@ func _condition(trigger: String) -> bool:
 			return _events.has(trigger)
 		"alarm":
 			return game.hq.level == Command.Level.ALARM
+		"radio_call":
+			return game.soldiers.any(func(s: Soldier) -> bool: return s.alive and s.radio_t > 0.0)
 		"bleeding":
 			return _events.has("bleeding") and p.bleed > 0.0 and p.bandage_t < 0.0
 		"leg_wound":

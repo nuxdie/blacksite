@@ -231,6 +231,8 @@ func _draw_overlay() -> void:
 	_draw_compass(size)
 	_draw_status(size)
 	_draw_markers()
+	if not game.tablet_access:
+		_draw_guard_states()
 	if p.alive and not game.tablet_access:
 		_draw_sights(c)
 		_draw_hack(c)
@@ -289,6 +291,38 @@ func _draw_compass(size: Vector2) -> void:
 	var dw := _f_label.get_string_size(dtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
 	_text(Vector2(cx - (lw + dw) * 0.5, y + 44), label, 14, Style.INK)
 	_text(Vector2(cx - (lw + dw) * 0.5 + lw, y + 44), dtxt, 14, Style.AMBER)
+
+
+## Over the heads of guards you can see: how aware each one is, and who is on the radio right now.
+func _draw_guard_states() -> void:
+	var cam := game.player.camera
+	var eye := game.player.eye_pos()
+	for s in game.soldiers:
+		if not s.alive:
+			continue
+		var calling := s.radio_t > 0.0
+		if s.state == Soldier.State.CALM and s.aware < 0.08 and not calling:
+			continue
+		var wp := s.head_pos() + Vector3.UP * 0.45
+		if cam.is_position_behind(wp) or wp.distance_to(eye) > 50.0 or not game.los(eye, s.head_pos()):
+			continue
+		var sp := cam.unproject_position(wp)
+		var tri := PackedVector2Array([sp + Vector2(0, 7), sp + Vector2(-7, -6), sp + Vector2(7, -6)])
+		if s.state == Soldier.State.COMBAT:
+			_overlay.draw_colored_polygon(tri, Style.RED)
+		else:
+			var k := clampf(s.aware, 0.0, 1.0)
+			var outline := tri.duplicate()
+			outline.append(tri[0])
+			_overlay.draw_polyline(outline, Style.AMBER, 1.5)
+			var top := lerpf(7.0, -6.0, k)
+			var w := 7.0 * (1.0 - (top + 6.0) / 13.0)
+			if k > 0.02:
+				_overlay.draw_colored_polygon(PackedVector2Array([sp + Vector2(0, 7), sp + Vector2(-w, top), sp + Vector2(w, top)]), Color(Style.AMBER, 0.9))
+		if calling:
+			var left := clampf(s.radio_t / 4.0, 0.0, 1.0)
+			_overlay.draw_arc(sp, 13.0, -PI / 2.0, -PI / 2.0 + TAU * left, 32, Style.RED, 2.0)
+			_text(sp + Vector2(0, -18), "CALLING IT IN", 12, Style.RED, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
 
 
 ## Marked guards: live while you can see them, otherwise a hollow marker where you last saw them.

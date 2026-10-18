@@ -580,17 +580,14 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 		_shot_hit = true
 	var s: Soldier = tgt.soldier
 	var zone: String = tgt.zone
-	var mul := w.head_mult * s.profile.helmet if zone == "head" else (0.7 if zone == "legs" else 1.0)
-	if zone != "head":
-		mul *= s.profile.armor
-	mul *= float(res.mul) * clampf(1.0 - (end_t - w.effective_range) / (w.effective_range * 1.5), 0.5, 1.0)
+	var dmg := Ballistics.zone_damage(w, zone, s.profile.helmet, s.profile.armor, end_t, float(res.mul))
 	if zone == "head":
 		stats.heads += 1
 		if s.profile.helmet < 1.0:
 			Sfx.play_at("helmet", end, 0.0, false)
 	Sfx.play_at("flesh", end, 0.0, false)
 	fx.burst("blood", end, -d)
-	s.take_hit(w.damage * mul, d, zone, true, w.suppressed)
+	s.take_hit(dmg, d, zone, true, w.suppressed)
 
 
 func _break_lamp(l: Lamp) -> void:
@@ -614,7 +611,7 @@ func soldier_shot(s: Soldier, target: Vector3, extra: float, suppressive: bool) 
 	var muzzle := s.model.muzzle.global_position
 	stats.enemy_shots += 1
 	var prof := s.profile
-	var pellets := 8 if prof.weapon_kind == "shotgun" else 1
+	var w := s.weapon
 	var base := (target - muzzle).normalized()
 	Sfx.play_at("enemy_" + prof.weapon_kind, muzzle, 2.0 if prof.weapon_kind == "lmg" else 0.0)
 	fx.muzzle(muzzle, 0.7 if prof.weapon_kind == "lmg" else 0.55)
@@ -622,11 +619,11 @@ func soldier_shot(s: Soldier, target: Vector3, extra: float, suppressive: bool) 
 		fx.flash_light(muzzle, Color("ffb060"), 2.5, 0.05, 7.0)
 	var space := get_world_3d().direct_space_state
 	var eye := player.eye_pos()
-	for i in pellets:
-		var cone := (0.065 if prof.weapon_kind == "shotgun" else s.aim_err * prof.spread_mult) + extra
-		var d := Ballistics.spread(base, cone)
+	var center := Ballistics.spread(base, s.aim_err * prof.spread_mult + extra)
+	for i in w.pellets:
+		var d := Ballistics.spread(center, w.hip_spread * 0.6) if w.pellets > 1 else center
 		var first := i == 0
-		var res := Ballistics.trace(space, muzzle, d, prof.penetration, 160.0,
+		var res := Ballistics.trace(space, muzzle, d, w.penetration, 160.0,
 			func(oo: Vector3, dd: Vector3, max_t: float) -> Dictionary:
 				if not player.alive:
 					return {}
@@ -645,11 +642,8 @@ func soldier_shot(s: Soldier, target: Vector3, extra: float, suppressive: bool) 
 		var tgt: Dictionary = res.get("target", {})
 		if not tgt.is_empty():
 			var zone: String = tgt.zone
-			var dmg := prof.damage * float(res.mul) * (2.2 if zone == "head" else (0.7 if zone == "legs" else 1.0))
-			if prof.weapon_kind == "shotgun":
-				dmg *= clampf(1.4 - end_t / 14.0, 0.25, 1.0)
 			stats.enemy_hits += 1
-			player.take_damage(dmg, muzzle, int(res.pens) > 0, zone)
+			player.take_damage(Ballistics.zone_damage(w, zone, Player.HELMET, Player.ARMOR, end_t, float(res.mul)), muzzle, int(res.pens) > 0, zone)
 		else:
 			var t := clampf((eye - muzzle).dot(d), 0.0, end_t)
 			var cp := muzzle + d * t

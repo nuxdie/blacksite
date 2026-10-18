@@ -3,6 +3,20 @@ class_name Ballistics
 ## Level boxes carry "pen" (resistance per metre) and "half" (extents) metadata,
 ## so the exit point is computed exactly instead of with a second ray.
 
+## The same rules for everyone: one round's damage to a hit zone, after helmet or body armour,
+## range falloff and whatever it already punched through.
+static func zone_damage(w: WeaponData, zone: String, helmet: float, armor: float, dist: float, through: float) -> float:
+	var mul := 1.0
+	match zone:
+		"head": mul = w.head_mult * helmet
+		"legs": mul = 0.7
+		_: mul = armor
+	var falloff := clampf(1.0 - (dist - w.effective_range) / (w.effective_range * 1.5), 0.5, 1.0)
+	if w.pellets > 1:
+		falloff = clampf(1.4 - dist / 14.0, 0.25, 1.0)
+	return w.damage * mul * falloff * through
+
+
 ## hit_fn(origin: Vector3, dir: Vector3, max_t: float) -> Dictionary  (needs "t"), {} for none
 ## wall_fn(point: Vector3, normal: Vector3, exit: bool, material: String) -> void
 static func trace(space: PhysicsDirectSpaceState3D, origin: Vector3, dir: Vector3, power: float, max_dist: float, hit_fn: Callable, wall_fn: Callable) -> Dictionary:

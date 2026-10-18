@@ -64,7 +64,9 @@ func contact(s: Soldier, pos: Vector3, how: String) -> void:
 		return
 	if game.comms_down or level == Level.ALARM:
 		return
-	_pending.append({"t": game.time + randf_range(2.5, 4.0), "s": s, "pos": pos})
+	var delay := randf_range(2.5, 4.0)
+	s.radio_t = delay
+	_pending.append({"t": game.time + delay, "s": s, "pos": pos})
 
 
 ## Security saw it on camera: no guard needs to survive to report it.
