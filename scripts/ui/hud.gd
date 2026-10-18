@@ -27,6 +27,10 @@ var _trace_t := 0.0
 var _vitals_a := 0.0
 var _ammo_a := 0.0
 var _ammo_seen := {}
+var _area := ""
+var _gadget_seen := ""
+var _gadget_flash := 0.0
+var _area_t := 0.0
 
 var _f_small: FontVariation
 var _f_label: FontVariation
@@ -144,7 +148,7 @@ func refresh(dt: float) -> void:
 	hints.update(dt)
 	_trace_t = maxf(0.0, _trace_t - dt)
 	var w := p.weapons
-	var ammo_key := {"cur": w.cur, "mag": w.mag[w.cur], "sp": (w.spare[w.cur] as Array).size(), "id": w.current().id, "mode": w.mode[w.cur], "g": w.gsel}
+	var ammo_key := {"cur": w.cur, "mag": w.mag[w.cur], "sp": (w.spare[w.cur] as Array).size(), "id": w.current().id, "mode": w.mode[w.cur]}
 	if ammo_key != _ammo_seen:
 		_ammo_seen = ammo_key
 		_ammo_a = 4.0
@@ -229,6 +233,7 @@ func _draw_overlay() -> void:
 	if game.tablet_access:
 		_draw_tablet(size)
 	_draw_compass(size)
+	_draw_area()
 	_draw_status(size)
 	_draw_markers()
 	if not game.tablet_access:
@@ -240,6 +245,7 @@ func _draw_overlay() -> void:
 		_draw_arcs(c)
 	_draw_vitals(size)
 	_draw_ammo(size)
+	_draw_gadgets(size)
 	_draw_prompts(size)
 	if not game.tablet_access:
 		_draw_hint(size)
@@ -368,30 +374,45 @@ func _draw_hack(c: Vector2) -> void:
 			_text(c + Vector2(0, 5), "%d" % roundi(prog * 100.0), 14, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
 
 
+## Where you are: named when you arrive, then it settles to a quiet label.
+func _draw_area() -> void:
+	var a := game.facility.area_name(game.player.global_position)
+	if a != _area:
+		_area = a
+		_area_t = 0.0
+	_area_t += get_process_delta_time()
+	var alpha := 1.0 if _area_t < 3.0 else maxf(0.45, 1.0 - (_area_t - 3.0))
+	_text(Vector2(34, 36), _area, 14, Color(Style.INK, alpha), HORIZONTAL_ALIGNMENT_LEFT, _f_label)
+
+
 ## The state of the night in one line under the objective: are you seen, how alert is the site,
 ## and anything running in the background. Nothing shows while all is quiet.
 func status_items() -> Array:
 	var out := []
 	var spotted := false
 	var hunted := false
-	var noticed := false
+	var top: Soldier = null
+	var camera_on := false
 	for s in game.soldiers:
 		if not s.alive:
 			continue
 		if s.state == Soldier.State.COMBAT:
 			hunted = true
 			spotted = spotted or s.sees
-		elif s.state == Soldier.State.SUSPICIOUS or s.aware > 0.25:
-			noticed = true
+		elif (s.state == Soldier.State.SUSPICIOUS or s.aware > 0.15) and s.notice != "" and (top == null or s.aware > top.aware):
+			top = s
 	for dv in game.facility.devices:
-		if dv.camera_live() and dv.sees_player and dv.aware > 0.25:
-			noticed = true
+		if dv.camera_live() and dv.sees_player and dv.aware > 0.1:
+			camera_on = true
 	if spotted:
 		out.append(["SPOTTED", Style.RED])
 	elif hunted:
 		out.append(["THEY'RE SEARCHING", Style.AMBER])
-	elif noticed:
-		out.append(["DRAWING ATTENTION", Style.AMBER])
+	elif top:
+		var why: String = {"lit": "YOU'RE LIT", "close": "TOO CLOSE", "seen": "IN THEIR VIEW", "heard": "TOO LOUD"}.get(top.notice, "")
+		out.append(["BEING NOTICED  ·  " + why, Style.AMBER])
+	if camera_on and not spotted:
+		out.append(["CAMERA ON YOU", Style.AMBER])
 	match game.hq.level:
 		Command.Level.CAUTION:
 			out.append(["SITE ON CAUTION", Style.AMBER])
@@ -630,12 +651,43 @@ func _draw_ammo(size: Vector2) -> void:
 	if cur.modes.size() > 1:
 		line += "  ·  " + w.fire_mode()
 	_text(Vector2(x, y + 6), line, 14, Color(Style.DIM, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
-	var gx := x
+
+
+## Equipment, always on screen: the one that G throws is amber, underlined and carries the key;
+## switching flashes it.
+func _draw_gadgets(size: Vector2) -> void:
+	var w := game.player.weapons
+	if w.gadgets.is_empty():
+		return
+	var key := "%d:%s" % [w.gsel, w.gadget_info().get("type", "")]
+	if key != _gadget_seen:
+		if _gadget_seen != "":
+			_gadget_flash = 1.2
+		_gadget_seen = key
+	_gadget_flash = maxf(0.0, _gadget_flash - get_process_delta_time())
+	var x := size.x - 34.0
+	var y := size.y - 10.0
 	for i in range(w.gadgets.size() - 1, -1, -1):
 		var g: Dictionary = w.gadgets[i]
-		var t := "%s %d" % [Gadget.INFO[g.type].name, int(g.n)]
+		var n := int(g.n)
 		var sel := i == w.gsel
-		gx -= _text(Vector2(gx, y + 24), t, 14, Color(Style.INK if sel else Style.DIM, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small) + 16.0
+		var t := "%s  ×%d" % [Gadget.INFO[g.type].name, n]
+		var col := Style.AMBER if sel else Style.DIM
+		if n == 0:
+			col = Color(col, 0.4)
+		var tw := _f_small.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+		if sel:
+			if _gadget_flash > 0.0:
+				_overlay.draw_rect(Rect2(x - tw - 6, y - 16, tw + 12, 22), Color(Style.AMBER, 0.18 * _gadget_flash))
+			_text(Vector2(x, y), t, 14, col, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+			_overlay.draw_rect(Rect2(x - tw, y + 4, tw, 2), col)
+			var glyph := Settings.glyph("gadget")
+			var cw := _keycap_width(glyph)
+			_keycap(Vector2(x - tw - 10 - cw, y), glyph, 0.9)
+			x -= tw + cw + 10 + 22
+		else:
+			_text(Vector2(x, y), t, 14, col, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+			x -= tw + 22
 
 
 ## Context: only what you can do right now.
@@ -646,7 +698,7 @@ func _prompts() -> Array:
 	if not p.alive:
 		return out
 	if w.aiming_throw:
-		out.append([["gadget"], "Release to throw  ·  aim the arc"])
+		out.append([["gadget"], "Release to throw %s  ·  aim the arc" % Gadget.INFO[w.gadget_info().type].name.to_lower()])
 		out.append([["aim"], "Cancel"])
 		return out
 	if p.drag_body:
@@ -655,6 +707,10 @@ func _prompts() -> Array:
 	if p.bleed > 0.0 and p.bandage_t < 0.0 and p.bandages > 0:
 		out.append([["bandage"], "Bandage  ·  %d left" % p.bandages])
 	if game.tablet_access:
+		return out
+	if p.ladder:
+		out.append([["move_forward", "move_back"], "Climb"])
+		out.append([["interact"], "Let go"])
 		return out
 	if game.using and game.use_target:
 		out.append([["interact"], "Keep holding  ·  " + game.use_target.use_label(game)])
@@ -675,6 +731,16 @@ func _prompts() -> Array:
 			out.append([["interact"], it.label()])
 		elif game.corpse_near():
 			out.append([["interact"], "Hold to drag body"])
+	if game.ladder_near() and not game.use_target and not game.takedown_target():
+		out.append([["interact"], "Climb ladder"])
+	if game.facility.in_duct(p.global_position + p.forward() * 0.9) and not p.crouched and not game.facility.in_duct(p.global_position):
+		out.append([["crouch"], "Crouch to crawl in"])
+	var dr := game.refused_door()
+	if dr:
+		if not dr.reader_live():
+			out.append([[], "%s  ·  reader dead, door stays locked" % dr.label])
+		else:
+			out.append([[], "%s  ·  needs %s access" % [dr.label, dr.access_name()]])
 	var junk := game.useless_rounds_near()
 	if junk:
 		out.append([[], "%s rounds  ·  none of your weapons take them" % junk.caliber])

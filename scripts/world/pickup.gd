@@ -13,6 +13,8 @@ var caliber := ""
 var weapon: WeaponData
 var mag_rounds := 0
 var spares: Array = []
+## BADGE: the access levels on it.
+var access: Array = []
 
 
 static func create(p_kind: Kind, pos: Vector3, p_amount := 1, p_permanent := false) -> Pickup:
@@ -27,6 +29,12 @@ static func create(p_kind: Kind, pos: Vector3, p_amount := 1, p_permanent := fal
 static func rounds(pos: Vector3, p_caliber: String, count: int) -> Pickup:
 	var p := create(Kind.ROUNDS, pos, count)
 	p.caliber = p_caliber
+	return p
+
+
+static func badge(pos: Vector3, levels: Array) -> Pickup:
+	var p := create(Kind.BADGE, pos)
+	p.access = levels.duplicate()
 	return p
 
 

@@ -11,6 +11,11 @@ var nav_region: NavigationRegion3D
 var lamps: Array[Lamp] = []
 var pickups: Array[Pickup] = []
 var devices: Array[Device] = []
+var doors: Array[Door] = []
+var searchlights: Array[SpotLight3D] = []
+var ladders: Array[Ladder] = []
+## Crawlspaces (axis-aligned boxes) where moving makes a racket on sheet metal.
+var ducts: Array[AABB] = []
 ## Insertion and extraction: outside the west wall, through a breach in it.
 var extraction := Vector3(-53.6, 0, -29.3)
 var intel_pos := Vector3(46, 5.0, 28.2)
@@ -73,7 +78,7 @@ func blocker(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float) -
 
 
 ## A sloped wedge (stairs). axis "x" or "z", dir +1 rises toward the max coordinate.
-func ramp(x0: float, z0: float, x1: float, z1: float, base: float, top: float, axis: String, dir: int, mat: String) -> void:
+func ramp(x0: float, z0: float, x1: float, z1: float, base: float, top: float, axis: String, dir: int, mat: String, show := true) -> void:
 	var p := func(t: float, w: int, y: float) -> Vector3:
 		var lo := x0 if axis == "x" else z0
 		var hi := x1 if axis == "x" else z1
@@ -102,10 +107,159 @@ func ramp(x0: float, z0: float, x1: float, z1: float, base: float, top: float, a
 	sh.points = pts
 	cs.shape = sh
 	body.add_child(cs)
-	body.add_child(mi)
+	if show:
+		body.add_child(mi)
 	body.set_meta("mat", "steel")
 	body.set_meta("pen", 0.0)
 	nav_region.add_child(body)
+
+
+## A visual-only box, optionally rotated (stair stringers, handrails, rungs).
+func deco(center: Vector3, size: Vector3, mat: Material, rot := Vector3.ZERO) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	mi.material_override = mat
+	mi.position = center
+	mi.rotation = rot
+	add_child(mi)
+	return mi
+
+
+## Open steel stairs: a smooth invisible slope to walk and path on, with real treads, stringers
+## and handrails on top of it. Same arguments as ramp().
+func stairs(x0: float, z0: float, x1: float, z1: float, base: float, top: float, axis: String, dir: int, rails := true) -> void:
+	ramp(x0, z0, x1, z1, base, top, axis, dir, "grating", false)
+	var steel := Mats.plain(Color("5d6166"), 0.45, 0.6)
+	var tread_mat := Mats.get_mat("grating")
+	var run := (x1 - x0) if axis == "x" else (z1 - z0)
+	var width := (z1 - z0) if axis == "x" else (x1 - x0)
+	var rise := top - base
+	var n := maxi(2, ceili(rise / 0.19))
+	var step_run := run / n
+	var along := (Vector3.RIGHT if axis == "x" else Vector3.BACK) * float(dir)
+	var start := Vector3(x0 if (axis == "x") == (dir > 0) else x1, base, z0 if (axis != "x") == (dir > 0) else z1)
+	if axis == "x":
+		start.z = (z0 + z1) * 0.5
+	else:
+		start.x = (x0 + x1) * 0.5
+	var across := Vector3.BACK if axis == "x" else Vector3.RIGHT
+	for i in n:
+		var c := start + along * step_run * (i + 0.5)
+		c.y = base + rise * (i + 1) / n - 0.03
+		var size := Vector3(step_run, 0.05, width) if axis == "x" else Vector3(width, 0.05, step_run)
+		deco(c, size, tread_mat)
+	var slope := atan2(rise, run)
+	var length := sqrt(rise * rise + run * run)
+	var mid := start + along * run * 0.5 + Vector3.UP * rise * 0.5
+	# stringers and rails tilt about the horizontal axis across the flight
+	var basis_rot := Basis(across, slope * (1.0 if dir > 0 else -1.0) * (-1.0 if axis == "x" else 1.0))
+	for side: float in [-0.5, 0.5]:
+		var off := across * width * side
+		var str_mi := deco(mid + off - Vector3.UP * 0.08, Vector3(length, 0.22, 0.05) if axis == "x" else Vector3(0.05, 0.22, length), steel)
+		str_mi.basis = basis_rot * str_mi.basis
+		if rails:
+			var rail := deco(mid + off + Vector3.UP * 0.92, Vector3(length, 0.04, 0.04) if axis == "x" else Vector3(0.04, 0.04, length), steel)
+			rail.basis = basis_rot * rail.basis
+			for k in 3:
+				var t := (k + 0.5) / 3.0
+				var pc := start + along * run * t + off + Vector3.UP * (rise * t + 0.46)
+				deco(pc, Vector3(0.04, 0.92, 0.04), steel)
+
+
+## A catwalk: grating deck at a height with handrails along the given open sides.
+func catwalk(x0: float, z0: float, x1: float, z1: float, y: float, rail_sides: Array, gaps := []) -> void:
+	box(x0, y - 0.1, z0, x1, y, z1, "grating")
+	var steel := Mats.plain(Color("5d6166"), 0.45, 0.6)
+	for side: String in rail_sides:
+		var a := Vector3.ZERO
+		var b := Vector3.ZERO
+		match side:
+			"n": a = Vector3(x0, y, z0); b = Vector3(x1, y, z0)
+			"s": a = Vector3(x0, y, z1); b = Vector3(x1, y, z1)
+			"w": a = Vector3(x0, y, z0); b = Vector3(x0, y, z1)
+			"e": a = Vector3(x1, y, z0); b = Vector3(x1, y, z1)
+		_rail(a, b, steel, gaps)
+	# hangers up to the roof trusses
+	var lx := absf(x1 - x0)
+	var lz := absf(z1 - z0)
+	var count := int(maxf(lx, lz) / 4.0)
+	for i in count + 1:
+		var t := float(i) / maxf(1.0, count)
+		var p := Vector3(lerpf(x0, x1, t) if lx > lz else x0 + 0.1, y, lerpf(z0, z1, t) if lz >= lx else z0 + 0.1)
+		deco(p + Vector3.UP * (9.0 - y) * 0.5, Vector3(0.03, 9.0 - y, 0.03), steel)
+
+
+func _rail(a: Vector3, b: Vector3, mat: Material, gaps: Array) -> void:
+	var d := b - a
+	var length := d.length()
+	_rail_body(a, b, gaps)
+	var n := int(length / 1.5) + 1
+	for k in range(n + 1):
+		var p := a + d * (float(k) / n)
+		if gaps.any(func(g: Vector3) -> bool: return Vector2(g.x - p.x, g.z - p.z).length() < 0.7):
+			continue
+		deco(p + Vector3.UP * 0.5, Vector3(0.04, 1.0, 0.04), mat)
+	for h: float in [0.5, 1.0]:
+		var segs := [[0.0, 1.0]]
+		for g: Vector3 in gaps:
+			var t := clampf((g - a).dot(d) / (length * length), 0.0, 1.0)
+			if (a + d * t).distance_to(Vector3(g.x, a.y, g.z)) > 0.3:
+				continue
+			var w := 0.55 / length
+			var nxt := []
+			for sg: Array in segs:
+				if t - w > sg[0]:
+					nxt.append([sg[0], minf(sg[1], t - w)])
+				if t + w < sg[1]:
+					nxt.append([maxf(sg[0], t + w), sg[1]])
+			segs = nxt
+		for sg: Array in segs:
+			var pa := a + d * float(sg[0])
+			var pb := a + d * float(sg[1])
+			var c := (pa + pb) * 0.5 + Vector3.UP * h
+			var sz := Vector3(maxf(0.04, absf(pb.x - pa.x)), 0.04, maxf(0.04, absf(pb.z - pa.z)))
+			deco(c, sz, mat)
+
+
+## Invisible collision along a handrail (with the same gaps), on the railing layer only.
+func _rail_body(a: Vector3, b: Vector3, gaps: Array) -> void:
+	var d := b - a
+	var length := d.length()
+	var segs := [[0.0, 1.0]]
+	for g: Vector3 in gaps:
+		var t := clampf((g - a).dot(d) / (length * length), 0.0, 1.0)
+		if (a + d * t).distance_to(Vector3(g.x, a.y, g.z)) > 0.3:
+			continue
+		var w := 0.55 / length
+		var nxt := []
+		for sg: Array in segs:
+			if t - w > sg[0]:
+				nxt.append([sg[0], minf(sg[1], t - w)])
+			if t + w < sg[1]:
+				nxt.append([maxf(sg[0], t + w), sg[1]])
+		segs = nxt
+	for sg: Array in segs:
+		var pa := a + d * float(sg[0])
+		var pb := a + d * float(sg[1])
+		var body := StaticBody3D.new()
+		body.collision_layer = Layers.RAILING
+		body.collision_mask = 0
+		body.position = (pa + pb) * 0.5 + Vector3.UP * 0.55
+		var cs := CollisionShape3D.new()
+		var bs := BoxShape3D.new()
+		bs.size = Vector3(maxf(0.08, absf(pb.x - pa.x)), 1.1, maxf(0.08, absf(pb.z - pa.z)))
+		cs.shape = bs
+		body.add_child(cs)
+		add_child(body)
+
+
+func ladder(bottom: Vector3, h: float, normal: Vector3, top_step := 0.8) -> Ladder:
+	var l := Ladder.make(bottom, h, normal, top_step)
+	add_child(l)
+	ladders.append(l)
+	return l
 
 
 func _face(st: SurfaceTool, pts: Array, center: Vector3) -> void:
@@ -242,7 +396,7 @@ func apply_brightness() -> void:
 
 func _layout() -> void:
 	box(-56, -1, -42, 56, 0, 42, "asphalt")
-	wall("x", 36.5, -51, 51, 1, 4.5, [], "block")
+	wall("x", 36.5, -51, 51, 1, 4.5, [{"a": -42.0, "b": -40.6, "y0": 0.0, "y1": 1.25}], "block")
 	wall("x", -36.5, -51, 51, 1, 4.5, [], "block")
 	wall("z", -50.5, -36, 36, 1, 4.5, [{"a": -30.3, "b": -28.3, "y0": 0.0, "y1": 4.5}], "block")
 	wall("z", 50.5, -36, 36, 1, 4.5, [], "block")
@@ -257,9 +411,13 @@ func _layout() -> void:
 	# warehouse (x 10..48, z -20..30)
 	box(10.25, 0, -19.75, 47.75, 0.02, 29.75, "concrete", false)
 	wall("z", 10, -20, 30, 0.5, 9, [{"a": 0.0, "b": 6.0, "y0": 0.0, "y1": 5.0}, {"a": 20.0, "b": 21.6, "y0": 0.0, "y1": 2.4}], "corrugated")
-	wall("z", 48, -20, 30, 0.5, 9, [], "corrugated")
+	wall("z", 48, -20, 30, 0.5, 9, [{"a": 10.0, "b": 11.4, "y0": 4.2, "y1": 6.6}], "corrugated")
 	wall("x", -20, 10, 48, 0.5, 9, [{"a": 28.0, "b": 29.6, "y0": 0.0, "y1": 2.4}], "corrugated")
-	wall("x", 30, 10, 48, 0.5, 9, [], "corrugated")
+	wall("x", 30, 10, 48, 0.5, 9, [{"a": 20.0, "b": 21.6, "y0": 0.0, "y1": 2.4}], "corrugated")
+	# fire escape up the east alley to the mezzanine
+	stairs(48.3, -4.0, 50.0, 9.4, 0, 4.2, "z", 1)
+	box(48.3, 4.0, 9.4, 50.0, 4.2, 12.2, "grating")
+	box(48.3, 4.2, 12.1, 50.0, 5.2, 12.2, "steel")
 	box(9.6, 9, -20.4, 48.4, 9.4, 30.4, "roof")
 	box(10.25, 3.9, 22, 47.75, 4.2, 29.75, "grating")
 	box(40, 3.9, -19.75, 47.75, 4.2, 22, "grating")
@@ -267,12 +425,17 @@ func _layout() -> void:
 		box(x - 0.2, 0, 21.8, x + 0.2, 3.9, 22.2, "steel")
 	for z: float in [-3.0, 6.0, 14.0]:
 		box(39.8, 0, z - 0.2, 40.2, 3.9, z + 0.2, "steel")
-	box(10.25, 4.2, 21.95, 12, 5.15, 22.05, "steel")
+	box(12.0, 4.2, 21.95, 12.1, 5.15, 22.05, "steel")
 	box(15, 4.2, 21.95, 40, 5.15, 22.05, "steel")
 	box(39.95, 4.2, -19.75, 40.05, 5.15, -9, "steel")
-	box(39.95, 4.2, -6, 40.05, 5.15, 22, "steel")
-	ramp(12, 10, 15, 22, 0, 4.2, "z", 1, "grating")
-	ramp(37, -19, 40, -6, 0, 4.2, "z", 1, "grating")
+	box(39.95, 4.2, -6, 40.05, 5.15, 6.0, "steel")
+	box(39.95, 4.2, 7.6, 40.05, 5.15, 22, "steel")
+	stairs(12, 10, 15, 22, 0, 4.2, "z", 1)
+	stairs(37, -19, 40, -6, 0, 4.2, "z", 1)
+	# catwalks: across the bay, and down the west wall to the north mezzanine
+	catwalk(10.25, 6.0, 40.0, 7.6, 4.2, ["n", "s"], [Vector3(14.0, 4.2, 6.0)])
+	catwalk(10.25, 7.6, 11.85, 22.0, 4.2, ["e"])
+	ladder(Vector3(14.0, 0, 6.0), 4.2, Vector3.FORWARD, 0.9)
 	wall("x", 24.5, 40.5, 47.75, 0.2, 2.6, [door(41, 1.4), win(44, 2.6, 1.0, 2.0)], "plaster", 4.2)
 	wall("z", 40.5, 24.5, 29.75, 0.2, 2.6, [win(25.5, 2.8, 1.0, 2.0)], "plaster", 4.2)
 	box(40.4, 6.8, 24.4, 47.75, 7.0, 29.75, "metal")
@@ -303,14 +466,21 @@ func _layout() -> void:
 	box(-29.8, 0, 12.2, -0.2, 0.02, 31.8, "concrete", false)
 	wall("x", 12, -30, 0, 0.4, 3.4, [door(-16), win(-27), win(-11), win(-5)], "plaster")
 	wall("x", 32, -30, 0, 0.4, 3.4, [win(-15), win(-6)], "plaster")
-	wall("z", -30, 12, 32, 0.4, 3.4, [door(20, 2.4), win(14), win(26)], "plaster")
+	wall("z", -30, 12, 32, 0.4, 3.4, [door(20, 2.4), win(14), {"a": 27.8, "b": 29.0, "y0": 0.1, "y1": 1.35}], "plaster")
+	_duct()
 	wall("z", 0, 12, 32, 0.4, 3.4, [door(20, 2.4), win(14), win(26)], "plaster")
 	wall("x", 20, -30, 0, 0.2, 3.4, [door(-25), door(-8)], "plaster")
 	wall("x", 22.4, -30, 0, 0.2, 3.4, [door(-26), door(-16), door(-6)], "plaster")
 	wall("z", -12, 12, 20, 0.2, 3.4, [], "plaster")
 	wall("z", -20, 22.4, 32, 0.2, 3.4, [], "plaster")
 	wall("z", -10, 22.4, 32, 0.2, 3.4, [], "plaster")
-	box(-30.2, 3.4, 11.8, 0.2, 3.7, 32.2, "concrete")
+	# roof slab, with a hatch over the armoury
+	box(-30.2, 3.4, 11.8, 0.2, 3.7, 30.8, "concrete")
+	box(-30.2, 3.4, 30.8, -13.6, 3.7, 32.2, "concrete")
+	box(-12.4, 3.4, 30.8, 0.2, 3.7, 32.2, "concrete")
+	box(-13.6, 3.4, 31.8, -12.4, 3.7, 32.2, "concrete")
+	box(-13.7, 3.7, 30.75, -12.3, 3.85, 30.8, "steel", false)
+	ladder(Vector3(-13.0, 0, 31.8), 3.7, Vector3.FORWARD, -1.5)
 	box(-30.2, 3.7, 11.8, 0.2, 4.6, 12.1, "concrete")
 	box(-30.2, 3.7, 31.9, -18, 4.6, 32.2, "concrete")
 	box(-15.4, 3.7, 31.9, 0.2, 4.6, 32.2, "concrete")
@@ -318,7 +488,7 @@ func _layout() -> void:
 	box(-0.1, 3.7, 12.1, 0.2, 4.6, 31.9, "concrete")
 	box(-22, 3.7, 20, -19, 5.0, 23, "metal")
 	box(-8, 3.7, 26, -6.5, 4.5, 29, "metal")
-	ramp(-28, 32.2, -16, 34.7, 0, 3.7, "x", 1, "grating")
+	stairs(-28, 32.2, -16, 34.7, 0, 3.7, "x", 1)
 	for t: Array in [[-26, 16], [-20, 17.5], [-6, 15.5], [-25, 28], [-15, 29], [-5, 27]]:
 		box(t[0] - 0.8, 0, t[1] - 0.45, t[0] + 0.8, 0.78, t[1] + 0.45, "wood")
 	box(-29.6, 0, 13, -28.9, 1.9, 15.5, "metal")
@@ -383,6 +553,11 @@ func _layout() -> void:
 
 	_vehicles()
 	_furnish()
+	_watchtower()
+	_armory()
+	_doors()
+	# a crate against the loading yard wall: a way over into the main yard
+	crate(-36.0, -21.0, 1.3)
 
 	add_pickup(Pickup.Kind.MEDKIT, Vector3(-6, 0.78, 15.5))
 	add_pickup(Pickup.Kind.MEDKIT, Vector3(35.5, 0.9, 15.5))
@@ -420,9 +595,13 @@ func _layout() -> void:
 ## The strip outside the west wall: dark scrub, the insertion vehicle, the breach.
 func _outside() -> void:
 	box(-56, 0.0, -42, -51, 0.015, 42, "dirt", false)
-	blocker(-56.5, 0, -42, -55.8, 40, 42)
-	blocker(-56, 0, -42.5, -51, 40, -41.8)
-	blocker(-56, 0, 41.8, -51, 40, 42.5)
+	box(-51, 0.0, 37, 56, 0.015, 42, "dirt", false)
+	blocker(-56.5, 0, -42.5, -55.8, 40, 42.5)
+	blocker(55.8, 0, -42.5, 56.5, 40, 42.5)
+	blocker(-56, 0, -42.5, 56, 40, -41.8)
+	blocker(-56, 0, 41.8, 56, 40, 42.5)
+	blocker(-51, 0, -41.8, 56, 40, -37)
+	blocker(51, 0, -37, 55.8, 40, 37)
 	for r: Array in [[-50.9, -30.9, 0.5, 0.35], [-50.2, -27.9, 0.4, 0.3], [-51.6, -28.7, 0.3, 0.25], [-49.6, -30.6, 0.35, 0.2], [-51.3, -31.5, 0.25, 0.2]]:
 		box(r[0] - r[2], 0, r[1] - r[2], r[0] + r[2], r[3], r[1] + r[2], "block", false)
 	sedan(Vector2(-53.8, -21.0), false, "c_green")
@@ -586,6 +765,133 @@ func _furnish() -> void:
 		mi.add_child(sc)
 
 
+## A crawl duct along the outside of the office's west wall into the server room. Too low to
+## stand in, so guards never use it; crawling is loud on sheet metal.
+func _duct() -> void:
+	box(-31.5, 0, 16.9, -30.2, 0.1, 29.2, "metal")
+	box(-31.5, 1.35, 16.9, -30.2, 1.45, 29.2, "metal")
+	box(-31.6, 0, 16.9, -31.5, 1.45, 29.2, "metal")
+	box(-31.6, 0, 29.2, -30.2, 1.45, 29.3, "metal")
+	ducts.append(AABB(Vector3(-31.5, 0, 16.9), Vector3(1.7, 1.45, 12.4)))
+	_device(Device.make(Device.Kind.VENT, "VENT GRILLE", Vector3(-30.85, 0.72, 16.88), 0.0))
+	_device(Device.make(Device.Kind.VENT, "VENT GRILLE", Vector3(-29.78, 0.72, 28.4), PI / 2))
+	# a ladder onto the blue container in the loading yard: a perch over the whole yard
+	ladder(Vector3(-34.0, 0, -30.0), 3.6, Vector3.FORWARD, 0.9)
+
+
+## Overwatch on the loading yard: a raised platform, waist-high walls for cover, a sweeping
+## searchlight. Guards climb it by the stairs; so can you.
+func _watchtower() -> void:
+	var x0 := 6.0
+	var x1 := 9.0
+	var z0 := -35.8
+	var z1 := -32.8
+	var top := 4.5
+	for c: Array in [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]:
+		var px: float = c[0]
+		var pz: float = c[1]
+		box(px - 0.1, 0, pz - 0.1, px + 0.1, 7.0, pz + 0.1, "steel")
+	box(x0, top - 0.2, z0, x1, top, z1, "grating")
+	box(x0, top, z0, x1, top + 1.0, z0 + 0.1, "metal")
+	box(x0, top, z1 - 0.1, x1, top + 1.0, z1, "metal")
+	box(x0, top, z0, x0 + 0.1, top + 1.0, z1, "metal")
+	box(x1 - 0.1, top, z0 + 1.5, x1, top + 1.0, z1, "metal")
+	box(x0 - 0.2, 7.0, z0 - 0.2, x1 + 0.2, 7.12, z1 + 0.2, "metal", false)
+	stairs(x1, z0, x1 + 6.0, z0 + 1.4, 0, top, "x", -1)
+	var sl := SpotLight3D.new()
+	sl.light_color = Color("e8f0ff")
+	sl.light_energy = 9.0
+	sl.spot_range = 38.0
+	sl.spot_angle = 9.0
+	sl.spot_attenuation = 0.6
+	sl.shadow_enabled = true
+	sl.light_volumetric_fog_energy = 3.0
+	sl.position = Vector3(x0 + 0.4, top + 1.3, z1 - 0.4)
+	sl.set_meta("zone", "LOADING YARD")
+	sl.set_meta("sweep", 0.0)
+	add_child(sl)
+	searchlights.append(sl)
+	var housing := MeshInstance3D.new()
+	var hm := CylinderMesh.new()
+	hm.top_radius = 0.22
+	hm.bottom_radius = 0.26
+	hm.height = 0.45
+	housing.mesh = hm
+	housing.material_override = Mats.plain(Color("2a2c2f"), 0.5, 0.6)
+	housing.rotation.x = PI / 2
+	sl.add_child(housing)
+
+
+## Searchlights sweep the yard in a slow arc.
+func tick_searchlights(dt: float) -> void:
+	for sl in searchlights:
+		var t: float = sl.get_meta("sweep") + dt
+		sl.set_meta("sweep", t)
+		var target := Vector3(-14.0 + sin(t * 0.25) * 20.0, 0.0, -27.0 + sin(t * 0.17) * 6.0)
+		sl.look_at(target, Vector3.UP)
+
+
+## The armoury behind the office: ammunition, a medkit and grenades, behind a security door.
+func _armory() -> void:
+	for r: Array in [[-19.6, 23.0, -19.0, 31.6], [-10.9, 23.0, -10.4, 31.6]]:
+		box(r[0], 0, r[1], r[2], 2.0, r[3], "rack")
+	add_pickup(Pickup.Kind.AMMO, Vector3(-19.3, 0.9, 27.0))
+	add_pickup(Pickup.Kind.MEDKIT, Vector3(-10.65, 0.9, 25.0))
+	add_pickup(Pickup.Kind.FRAG, Vector3(-10.65, 0.9, 29.0))
+
+
+func _doors() -> void:
+	var M := Door.Lock.MAGLOCK
+	var S := Door.Lock.STRIKE
+	_door(Door.make("SERVER ROOM", Vector3(-25.3, 0, 22.4), "x", 1.4, "office", M, "OFFICE"))
+	_door(Door.make("ARMOURY", Vector3(-15.3, 0, 22.4), "x", 1.4, "security", S, "OFFICE"))
+	_door(Door.make("WAREHOUSE SOUTH", Vector3(28.8, 0, -20.0), "x", 1.6, "warehouse", S, "WAREHOUSE", 2.4))
+	_door(Door.make("WAREHOUSE NORTH", Vector3(20.8, 0, 30.0), "x", 1.6, "warehouse", M, "WAREHOUSE", 2.4))
+	_door(Door.make("FIRE ESCAPE", Vector3(48.0, 4.2, 10.7), "z", 1.4, "warehouse", M, "WAREHOUSE", 2.4))
+	_door(Door.make("DATA OFFICE", Vector3(41.7, 4.2, 24.5), "x", 1.4, "secure", S, "WAREHOUSE"))
+
+
+func _door(d: Door) -> void:
+	add_child(d)
+	doors.append(d)
+
+
+## Where you are, for the HUD.
+func area_name(p: Vector3) -> String:
+	if p.x < -50.5 or p.x > 50.5 or absf(p.z) > 36.5:
+		return "OUTSIDE THE WIRE"
+	if p.x > 5.5 and p.x < 9.5 and p.z > -36.0 and p.z < -32.5 and p.y > 3.5:
+		return "WATCHTOWER"
+	if p.x > 10.0 and p.x < 48.0 and p.z > -20.0 and p.z < 30.0:
+		if p.y > 3.5:
+			return "DATA OFFICE" if p.x > 40.5 and p.z > 24.5 else "MEZZANINE"
+		return "WAREHOUSE"
+	if p.x > -30.5 and p.x < 0.5 and p.z > 11.5 and p.z < 32.5:
+		if p.y > 3.0:
+			return "OFFICE ROOF"
+		if p.z > 22.4 and p.x < -20.0:
+			return "SERVER ROOM"
+		if p.z > 22.4 and p.x < -10.0:
+			return "ARMOURY"
+		return "OFFICE"
+	if p.z < -20.0:
+		return "LOADING YARD"
+	if p.x > -16.0 and p.x < -9.0 and p.z > -21.0 and p.z < -14.0:
+		return "GATEHOUSE"
+	if p.x < -30.0:
+		return "WEST ALLEY"
+	if p.z > 12.0 or (p.x > 10.0 and p.z > 30.0):
+		return "NORTH YARD"
+	return "MAIN YARD"
+
+
+func in_duct(p: Vector3) -> bool:
+	for a in ducts:
+		if a.has_point(p + Vector3.UP * 0.3):
+			return true
+	return false
+
+
 func zone_of(p: Vector3) -> String:
 	if p.x > 10.0 and p.x < 48.0 and p.z > -20.0 and p.z < 30.0:
 		return "WAREHOUSE"
@@ -636,6 +942,10 @@ func bake_navigation() -> void:
 func reset_props() -> void:
 	for d in devices:
 		d.reset()
+	for d in doors:
+		d.reset()
+	for sl in searchlights:
+		sl.visible = true
 	for l in lamps:
 		l.dead = false
 		l.powered = true
@@ -652,6 +962,20 @@ func reset_props() -> void:
 			pickups.remove_at(i)
 
 
+## How much one lamp lights a person standing at p: only if it can actually reach them, with
+## their chest or head in its line of sight. Walls stop it.
+func lamp_light(l: Lamp, p: Vector3) -> float:
+	var c := l.contribution(p)
+	if c <= 0.0:
+		return 0.0
+	var space := get_world_3d().direct_space_state
+	for h: float in [1.0, 1.55]:
+		var q := PhysicsRayQueryParameters3D.create(l.light.global_position, p + Vector3.UP * h, Layers.WORLD)
+		if space.intersect_ray(q).is_empty():
+			return c
+	return 0.0
+
+
 ## How visible a point is: 0.22 in deep shadow, 1 under a lamp or flashlight.
 func light_level(p: Vector3, flashlights: Array) -> float:
 	var level := 0.22
@@ -661,7 +985,7 @@ func light_level(p: Vector3, flashlights: Array) -> float:
 	if space.intersect_ray(q).is_empty():
 		level += 0.3
 	for l in lamps:
-		level += l.contribution(p) * 0.75
+		level += lamp_light(l, p) * 0.75
 	for f: SpotLight3D in flashlights:
 		if not f.visible:
 			continue

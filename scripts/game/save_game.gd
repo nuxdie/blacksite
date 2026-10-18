@@ -40,14 +40,14 @@ static func capture(game: Game) -> Dictionary:
 		soldiers.append({
 			"alive": s.alive, "pos": s.global_position, "yaw": s.yaw, "hp": s.hp, "state": s.state, "aware": s.aware,
 			"patrol_i": s.patrol_i, "corpse_found": s.corpse_found, "accounted": s.accounted, "tagged": s.tagged,
-			"tag_seen": s.tag_seen, "mag": s.mag, "limp": s.limp, "fall_side": s.fall_side, "badge": s.carries_badge,
+			"tag_seen": s.tag_seen, "mag": s.mag, "limp": s.limp, "fall_side": s.fall_side, "badge": s.badge.duplicate(),
 			"squad": s.squad.id, "type": s.profile.id,
 		})
 	var pickups := []
 	for pk in game.facility.pickups:
 		pickups.append({
 			"kind": pk.kind, "pos": pk.global_position, "amount": pk.amount, "taken": pk.taken, "permanent": pk.permanent,
-			"caliber": pk.caliber, "weapon": pk.weapon.id if pk.weapon else "", "mag": pk.mag_rounds, "spares": pk.spares,
+			"caliber": pk.caliber, "weapon": pk.weapon.id if pk.weapon else "", "mag": pk.mag_rounds, "spares": pk.spares, "access": pk.access,
 		})
 	var repairs := []
 	for r in game._repairs:
@@ -55,7 +55,7 @@ static func capture(game: Game) -> Dictionary:
 	return {
 		"version": 1,
 		"time": game.time, "mission": game.mission, "detected": game.detected, "comms_down": game.comms_down,
-		"has_badge": game.has_badge, "trace": game.trace, "reinforce_t": game.reinforce_t, "stats": game.stats.duplicate(),
+		"access": game.access.duplicate(), "doors": game.facility.doors.map(func(dr: Door) -> Array: return [dr.unlocked, dr.powered]), "trace": game.trace, "reinforce_t": game.reinforce_t, "stats": game.stats.duplicate(),
 		"repairs": repairs,
 		"hq": {"level": game.hq.level, "qrf": game.hq.qrf_called, "stats": game.hq.stats.duplicate(), "check_t": game.hq._check_t, "last_contact": game.hq.last_contact},
 		"player": {
@@ -77,7 +77,11 @@ static func restore(game: Game, d: Dictionary) -> void:
 	game.mission = d.mission
 	game.detected = d.detected
 	game.comms_down = d.comms_down
-	game.has_badge = d.has_badge
+	game.access = d.access
+	var doors: Array = d.doors
+	for i in mini(doors.size(), game.facility.doors.size()):
+		game.facility.doors[i].unlocked = doors[i][0]
+		game.facility.doors[i].powered = doors[i][1]
 	game.trace = d.trace
 	game.reinforce_t = d.reinforce_t
 	game.stats = d.stats
@@ -123,6 +127,8 @@ static func restore(game: Game, d: Dictionary) -> void:
 				np = Pickup.dropped_weapon(e.pos, load("res://resources/weapons/%s.tres" % e.weapon), e.mag, e.spares)
 			Pickup.Kind.ROUNDS:
 				np = Pickup.rounds(e.pos, e.caliber, e.amount)
+			Pickup.Kind.BADGE:
+				np = Pickup.badge(e.pos, e.access)
 			_:
 				np = Pickup.create(e.kind, e.pos, e.amount, false)
 		game.facility.place(np)

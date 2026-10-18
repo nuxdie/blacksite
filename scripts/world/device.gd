@@ -4,7 +4,7 @@ extends Node3D
 ## network reached from access points, lights hang off zone breakers, guard radio runs through a
 ## relay cabinet, and the data has to be copied off the laptop with a drive.
 
-enum Kind { CAMERA, ACCESS, RELAY, BREAKER, LAPTOP }
+enum Kind { CAMERA, ACCESS, RELAY, BREAKER, LAPTOP, VENT }
 
 const CAM_RANGE := 26.0
 const CAM_HALF_ANGLE := 30.0
@@ -50,6 +50,7 @@ var _lens_mat: StandardMaterial3D
 var _cone: SpotLight3D
 var _led_mat: StandardMaterial3D
 var _drive: MeshInstance3D
+var _grille: StaticBody3D
 
 
 static func camera(id: int, pos: Vector3, facing_yaw: float, sweep_range: float, tilt := -0.35) -> Device:
@@ -83,6 +84,7 @@ func _ready() -> void:
 		Kind.RELAY: _build_relay()
 		Kind.BREAKER: _build_breaker()
 		Kind.LAPTOP: _build_laptop()
+		Kind.VENT: _build_vent()
 
 
 func reset() -> void:
@@ -107,6 +109,8 @@ func reset() -> void:
 		_drive.visible = false
 	if _led_mat:
 		_led_mat.emission_energy_multiplier = 1.4
+	if kind == Kind.VENT and _grille:
+		_set_grille(true)
 
 
 func save_state() -> Dictionary:
@@ -130,6 +134,8 @@ func load_state(d: Dictionary) -> void:
 		head.visible = false
 	if kind == Kind.BREAKER and sabotaged:
 		_led_mat.emission = Color("ff4a3a")
+	if kind == Kind.VENT:
+		_set_grille(not sabotaged)
 	if _drive:
 		_drive.visible = copy_state == "copying" or copy_state == "done"
 
@@ -215,6 +221,41 @@ func _build_breaker() -> void:
 	_box(self, Vector3(0.03, 0.03, 0.01), _led_mat, Vector3(0.15, -0.2, -0.065))
 
 
+## A screwed-on duct grille: solid until you take it off.
+func _build_vent() -> void:
+	_grille = StaticBody3D.new()
+	_grille.collision_layer = Layers.WORLD
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(1.3, 1.25, 0.05)
+	cs.shape = bs
+	_grille.add_child(cs)
+	var frame := Mats.plain(Color("6a6f74"), 0.5, 0.6)
+	for i in 7:
+		var slat := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(1.26, 0.05, 0.04)
+		slat.mesh = bm
+		slat.material_override = frame
+		slat.position = Vector3(0, -0.54 + i * 0.18, 0)
+		slat.rotation.x = 0.5
+		_grille.add_child(slat)
+	for sx: float in [-0.63, 0.63]:
+		var side := MeshInstance3D.new()
+		var sm := BoxMesh.new()
+		sm.size = Vector3(0.04, 1.25, 0.05)
+		side.mesh = sm
+		side.material_override = frame
+		side.position = Vector3(sx, 0, 0)
+		_grille.add_child(side)
+	add_child(_grille)
+
+
+func _set_grille(on: bool) -> void:
+	_grille.visible = on
+	(_grille.get_child(0) as CollisionShape3D).set_deferred("disabled", not on)
+
+
 func _build_laptop() -> void:
 	_box(self, Vector3(0.36, 0.02, 0.25), Mats.plain(Color("202224"), 0.4, 0.5), Vector3(0, 0.01, 0))
 	_led_mat = Mats.emissive(Color("40ff90"), 1.6)
@@ -236,6 +277,8 @@ func use_label(game: Game) -> String:
 			return "" if sabotaged else "Sabotage relay"
 		Kind.BREAKER:
 			return "" if sabotaged else "Cut power  ·  %s" % zone
+		Kind.VENT:
+			return "" if sabotaged else "Unscrew the vent grille"
 		Kind.LAPTOP:
 			match copy_state:
 				"idle": return "Plug in drive"
@@ -248,6 +291,7 @@ func use_time(game: Game) -> float:
 		Kind.ACCESS: return 1.5 if game.has_badge else 15.0
 		Kind.RELAY: return 6.0
 		Kind.BREAKER: return 1.0
+		Kind.VENT: return 2.5
 	return 0.8
 
 
@@ -262,11 +306,16 @@ func use_point() -> Vector3:
 		Kind.ACCESS: return global_position + Vector3.UP * (0.25 if label == "SECURITY TERMINAL" else (1.0 if label == "SERVER CABINET" else 0.0))
 		Kind.RELAY: return global_position + Vector3.UP * 0.7
 		Kind.LAPTOP: return global_position + Vector3.UP * 0.1
+		Kind.VENT: return global_position
 	return global_position
 
 
 func on_used(game: Game) -> void:
 	match kind:
+		Kind.VENT:
+			sabotaged = true
+			_set_grille(false)
+			Sfx.play_at("impact_metal", global_position, -10.0)
 		Kind.ACCESS:
 			game.open_tablet(self, not game.has_badge)
 		Kind.RELAY:

@@ -186,6 +186,14 @@ func build(profile: SoldierProfile) -> void:
 func animate(dt: float, s: Soldier) -> void:
 	var hs := Vector2(s.velocity.x, s.velocity.z).length()
 	var k := s.crouch_k
+	if not s.climb.is_empty():
+		var c := sin(s.global_position.y * 10.0)
+		for i in 2:
+			(legs[i].th as Node3D).rotation.x = 0.6 + c * 0.5 * (1.0 if i == 0 else -1.0)
+			(legs[i].kn as Node3D).rotation.x = -0.9
+		aim.rotation.x = -1.2
+		torso.rotation.x = 0.05
+		return
 	var sw := minf(1.0, hs / 3.0)
 	var ph := s.anim * (3.0 + hs * 1.6)
 	var breathe := sin(s.anim * 1.7) * 0.006

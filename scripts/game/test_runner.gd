@@ -254,6 +254,11 @@ func _autotest() -> void:
 	hk["guards_dispatched"] = game.soldiers.filter(func(x: Soldier) -> bool: return x.state == Soldier.State.COMBAT).size()
 	# bypass at the junction box without credentials
 	await _fresh("carbine")
+	var lookout := _find("yard", 7.5)
+	lookout.alive = false
+	lookout.visible = false
+	lookout.accounted = true
+	lookout.collision_layer = 0
 	var junction := _device("JUNCTION BOX")
 	game.player.global_position = junction.use_point() + Vector3(0, -1.3, -1.2)
 	await _frames(5)
@@ -279,8 +284,11 @@ func _autotest() -> void:
 	await _frames(2)
 	hk["intrusion_locked"] = junction.locked > 0.0
 	hk["tablet_closed"] = game.tablet_access == null
+	# leave before they come to look
+	game.player.global_position = Vector3(-54, 0, -20)
 	await _frames(60 * 22)
 	hk["repair_dispatched"] = cams[2].repair_pending or not cams[2].disabled
+	hk["repair_debug"] = {"combat": game.soldiers.filter(func(x: Soldier) -> bool: return x.alive and x.state == Soldier.State.COMBAT).size(), "tasks": game.soldiers.filter(func(x: Soldier) -> bool: return not x.task.is_empty()).size(), "repairs": game._repairs.size(), "alarm": Command.Level.keys()[game.hq.level]}
 	# badge: the booth guard carries one; with it the terminal logs in cleanly
 	await _fresh("carbine")
 	var booth := _find("yard", -12.5)
@@ -387,6 +395,8 @@ func _autotest() -> void:
 	r["security"] = hk
 	r["consequences"] = await _consequences()
 	r["quicksave"] = await _quicksave()
+	r["vertical"] = await _vertical()
+	r["fairness"] = await _fairness()
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -415,6 +425,187 @@ func _autotest() -> void:
 	game.god_mode = true
 	r["ms"] = Time.get_ticks_msec() - t0
 	print("AUTOTEST ", JSON.stringify(r))
+
+
+## Detection has to be explainable: no light through walls, no sight through doors, footsteps
+## muffled by walls, darkness and stance really working, and a stated reason when noticed.
+func _fairness() -> Dictionary:
+	var c := {}
+	await _fresh("carbine")
+	var fac := game.facility
+	# a lamp inside the office must not light someone standing outside its wall
+	var office_lamp: Lamp = null
+	for l in fac.lamps:
+		if l.global_position.distance_to(Vector3(-21, 3.3, 16)) < 0.5:
+			office_lamp = l
+	c["office_lamp_inside"] = snappedf(fac.lamp_light(office_lamp, Vector3(-21, 0, 13.5)), 0.01)
+	c["office_lamp_through_wall"] = snappedf(fac.lamp_light(office_lamp, Vector3(-21, 0, 11.2)), 0.01)
+	c["no_light_through_wall"] = c["office_lamp_through_wall"] == 0.0 and c["office_lamp_inside"] > 0.0
+	# a closed door blocks sight both ways
+	var g := _find("wh", 14.0)
+	_isolate([g])
+	g.patrol.clear()
+	g.global_position = Vector3(20.8, 0, 27.4)
+	g.post = g.global_position
+	g.yaw = PI
+	g.base_yaw = PI
+	g.post_yaw = PI
+	var p := game.player
+	p.global_position = Vector3(20.8, 0, 32.6)
+	p.yaw = 0.0
+	var saw := false
+	for _i in 120:
+		await get_tree().physics_frame
+		saw = saw or g.sees
+	c["door_blocks_sight"] = not saw and g.aware < 0.05
+	# dark and crouched vs lit and standing, 12 m in front of a calm guard
+	await _fresh("carbine")
+	g = _find("yard", -10.0)
+	_isolate([g])
+	g.patrol.clear()
+	var dark := Vector3.INF
+	var lit := Vector3.INF
+	for l in fac.lamps:
+		var below := Vector3(l.global_position.x, 0, l.global_position.z) + (g.global_position - l.global_position).normalized() * 1.0
+		below.y = 0.0
+		var dd := below.distance_to(g.global_position)
+		if lit == Vector3.INF and dd > 9.0 and dd < 20.0 and game.los(g.eye(), below + Vector3.UP * 1.2) and fac.light_level(below, []) > 0.7:
+			lit = below
+	for i in 80:
+		var ang := randf_range(-0.35, 0.35)
+		var dist := randf_range(10.0, 14.0)
+		var pt := g.global_position + Vector3(-sin(g.yaw + ang), 0, -cos(g.yaw + ang)) * dist
+		if not game.los(g.eye(), pt + Vector3.UP * 1.0):
+			continue
+		var lv := fac.light_level(pt, [])
+		if lv < 0.4 and dark == Vector3.INF:
+			dark = pt
+		if lv > 0.75 and lit == Vector3.INF:
+			lit = pt
+	c["found_spots"] = [dark != Vector3.INF, lit != Vector3.INF]
+	if dark != Vector3.INF:
+		p.global_position = dark
+		p.crouch_toggle = true
+		await _frames(60 * 5)
+		c["dark_crouched_5s"] = {"aware": snappedf(g.aware, 0.01), "state": Soldier.State.keys()[g.state]}
+	if lit != Vector3.INF:
+		await _fresh("carbine")
+		g = _find("yard", -10.0)
+		_isolate([g])
+		g.patrol.clear()
+		var face := lit - g.global_position
+		g.yaw = atan2(-face.x, -face.z)
+		g.base_yaw = g.yaw
+		g.post_yaw = g.yaw
+		p.global_position = lit
+		p.crouch_toggle = false
+		var t := 0.0
+		var reason := ""
+		while t < 8.0 and g.state != Soldier.State.COMBAT:
+			await get_tree().physics_frame
+			t += 1.0 / 60.0
+			if reason == "" and game.hud.status_items().size() > 0:
+				reason = game.hud.status_items()[0][0]
+		c["lit_standing_detect_s"] = snappedf(t, 0.1)
+		c["reason_shown"] = reason
+	# sprinting on the other side of a wall, inside the footstep radius
+	await _fresh("carbine")
+	g = _find("office", -15.0)
+	_isolate([g])
+	g.patrol.clear()
+	p.global_position = Vector3(-19.5, 0, 21.2)
+	p.yaw = -PI / 2
+	Input.action_press("sprint")
+	Input.action_press("move_forward")
+	await _frames(60)
+	Input.action_release("move_forward")
+	Input.action_release("sprint")
+	c["sprint_behind_wall"] = {"aware": snappedf(g.aware, 0.01), "state": Soldier.State.keys()[g.state], "dist": snappedf(g.global_position.distance_to(p.global_position), 0.1)}
+	# a camera never sees through a wall: stand behind the booth from cam 2
+	var cam2: Device = game.cameras()[1]
+	var behind := Vector3(-12.5, 0, -14.5)
+	c["camera_through_wall"] = cam2.sees_point(game, behind + Vector3.UP * 1.4) and not game.los(cam2.head.global_position, behind + Vector3.UP * 1.4)
+	return c
+
+
+## Stairs, ladders and the crawl duct, for the player and for guards.
+func _vertical() -> Dictionary:
+	var c := {}
+	await _fresh("carbine")
+	_isolate([])
+	var p := game.player
+	# climb the warehouse ladder onto the catwalk
+	var l: Ladder = game.facility.ladders[0]
+	p.global_position = l.bottom_exit()
+	await _frames(5)
+	c["ladder_prompt"] = game.ladder_near() == l
+	p.grab_ladder(l)
+	Input.action_press("move_forward")
+	for _i in 300:
+		await get_tree().physics_frame
+		if p.ladder == null:
+			break
+	Input.action_release("move_forward")
+	await _frames(30)
+	c["player_on_catwalk"] = p.ladder == null and p.global_position.y > 4.0
+	c["catwalk_area"] = game.facility.area_name(p.global_position)
+	# walk up the west stairs to the mezzanine
+	p.global_position = Vector3(13.5, 0.1, 9.0)
+	p.yaw = PI
+	await _frames(5)
+	Input.action_press("move_forward")
+	await _frames(240)
+	Input.action_release("move_forward")
+	c["stairs_top_y"] = snappedf(p.global_position.y, 0.1)
+	# a guard sent to the catwalk takes the ladder
+	await _fresh("carbine")
+	var g := _find("wh", 14.0)
+	_isolate([g])
+	g.patrol.clear()
+	g.post = Vector3(20.0, 4.2, 6.8)
+	g.global_position = Vector3(14.0, 0, 4.0)
+	var max_y := 0.0
+	var climbed := false
+	for _i in 60 * 20:
+		await get_tree().physics_frame
+		max_y = maxf(max_y, g.global_position.y)
+		climbed = climbed or not g.climb.is_empty()
+	c["guard_used_ladder"] = climbed
+	c["guard_max_y"] = snappedf(max_y, 0.1)
+	# take the grille off and crawl into the server room
+	await _fresh("carbine")
+	_isolate([])
+	var vent: Device = null
+	for dv in game.facility.devices:
+		if dv.kind == Device.Kind.VENT and dv.global_position.z < 20.0:
+			vent = dv
+	p.global_position = vent.global_position + Vector3(0, -0.72, -1.2)
+	await _frames(3)
+	_look_at(vent.use_point())
+	await _frames(3)
+	Input.action_press("interact")
+	await _frames(int(vent.use_time(game) * 60.0) + 20)
+	Input.action_release("interact")
+	c["grille_open"] = vent.sabotaged
+	var inner: Device = null
+	for dv in game.facility.devices:
+		if dv.kind == Device.Kind.VENT and dv != vent:
+			inner = dv
+	inner.on_used(game)
+	p.crouch_toggle = true
+	await _frames(20)
+	for wp: Vector3 in [Vector3(-30.85, 0.1, 28.4), Vector3(-28.5, 0, 28.4)]:
+		for _k in 600:
+			var to := wp - p.global_position
+			to.y = 0.0
+			if to.length() < 0.4:
+				break
+			p.yaw = atan2(-to.x, -to.z)
+			Input.action_press("move_forward")
+			await get_tree().physics_frame
+		Input.action_release("move_forward")
+	c["crawled_to"] = game.facility.area_name(p.global_position)
+	return c
 
 
 ## Save the night mid-way, change everything, load it back.
@@ -558,6 +749,14 @@ func _shots(dir: String) -> void:
 		["breach", Vector3(-47, 0, -29.3), PI / 2, 0.0],
 		["loading", Vector3(-20, 0, -26), -PI / 2, 0.0],
 		["office", Vector3(-22, 0, 18.5), -PI / 2 - 0.4, -0.1],
+		["tower", Vector3(-2, 0, -27), -PI * 0.62, 0.12],
+		["catwalk", Vector3(12.5, 4.2, 6.8), -PI / 2, -0.15],
+		["ladder", Vector3(14.0, 0, 2.5), PI, 0.3],
+		["duct", Vector3(-30.85, 0, 14.5), PI, 0.0],
+		["hatch", Vector3(-13.0, 0, 28.8), PI, 0.55],
+		["fire_escape", Vector3(49.1, 0, -12), 0.0, 0.15],
+		["culvert", Vector3(-41.3, 0, 32), 0.0, -0.1],
+		["data_door", Vector3(41.7, 4.2, 20.5), 0.0, 0.0],
 		["gate", Vector3(-11, 0, -24), PI, 0.02],
 		["corridor", Vector3(-28, 0, 21.2), -PI / 2, 0.0],
 		["warehouse", Vector3(12, 0, -10), PI + 0.3, 0.0],

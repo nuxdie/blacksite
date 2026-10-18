@@ -64,6 +64,10 @@ var hacking := false
 ## Working the security tablet: no moving, no looking around.
 var in_tablet := false
 var drag_snd := 0.0
+## The ladder being climbed, if any.
+var ladder: Ladder = null
+var _climb_snd := 0.0
+var _duct_snd := 0.0
 ## Wounds don't heal by themselves: open wounds bleed until bandaged, a leg hit stops you running
 ## until a medkit splints it.
 var bleed := 0.0
@@ -90,7 +94,7 @@ var _arc_ring: MeshInstance3D
 func _ready() -> void:
 	_shape = col.shape as CapsuleShape3D
 	collision_layer = Layers.PLAYER
-	collision_mask = Layers.WORLD | Layers.SOLDIERS
+	collision_mask = Layers.WORLD | Layers.SOLDIERS | Layers.RAILING
 	floor_snap_length = 0.35
 	floor_max_angle = deg_to_rad(46.0)
 	_build_arc()
@@ -119,6 +123,7 @@ func spawn(pos: Vector3, facing := PI) -> void:
 	leg_wound = false
 	bandages = 2
 	bandage_t = -1.0
+	ladder = null
 	weapons.equip(Settings.primary, Settings.gadgets)
 
 
@@ -162,7 +167,7 @@ func speed_2d() -> float:
 
 
 func can_fire() -> bool:
-	return alive and active and not hacking and not in_tablet and not sprinting and bandage_t < 0.0 and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
+	return alive and active and not hacking and not in_tablet and not sprinting and bandage_t < 0.0 and ladder == null and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
 
 
 func _ray(from: Vector3, to: Vector3) -> Dictionary:
@@ -217,11 +222,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("gadget_cycle"):
 		weapons.cycle_gadget()
 	elif event.is_action_pressed("interact"):
-		game.interact()
+		if ladder:
+			ladder = null
+		elif game.takedown_target() == null and game.use_target == null and game.ladder_near():
+			grab_ladder(game.ladder_near())
+		else:
+			game.interact()
 	elif event.is_action_pressed("bandage"):
 		start_bandage()
 	elif event.is_action_pressed("jump"):
-		if vault_ok:
+		if ladder:
+			velocity = ladder.normal * 2.5
+			ladder = null
+		elif vault_ok:
 			_start_vault()
 		elif is_on_floor() and not crouched:
 			velocity.y = JUMP
@@ -294,10 +307,13 @@ func tick(dt: float) -> void:
 			reach = signf(reach) * maxf(0.0, base.distance_to(hit.position) - 0.15)
 	lean_reach = reach
 
-	if vault_t >= 0.0:
+	if ladder:
+		_climb(dt, f)
+	elif vault_t >= 0.0:
 		_update_vault(dt)
 	else:
 		_move(dt, wish, w)
+	_duct_noise(dt)
 	_update_drag(dt)
 
 	var hs := speed_2d()
@@ -420,6 +436,61 @@ func _probe_surroundings() -> void:
 		var low := global_position + Vector3.UP * EYE_CROUCH
 		var high := global_position + Vector3.UP * EYE_PEEK
 		low_cover_ahead = not _ray(low, low + d * 1.3).is_empty() and _ray(high, high + d * 1.3).is_empty()
+
+
+# ------------------------------------------------------------------ ladders and ducts
+
+func grab_ladder(l: Ladder) -> void:
+	ladder = l
+	velocity = Vector3.ZERO
+	drag_body = null
+	crouch_toggle = false
+	weapons.reload_t = 0.0
+	weapons.tube_loading = false
+	var y := global_position.y
+	if y > l.top_y() - 0.6:
+		y = l.top_y() - 1.0
+	global_position = l.climb_point(y)
+	Sfx.play("cloth")
+	game.hud.learn("ladder")
+
+
+## Forward climbs, back descends; off the top you step onto the platform, off the bottom you let go.
+func _climb(dt: float, f: float) -> void:
+	velocity = Vector3.ZERO
+	var l := ladder
+	var y := global_position.y + f * Ladder.CLIMB_SPEED * dt
+	if y >= l.top_y() - 0.05 and f > 0.0:
+		global_position = l.top_exit
+		ladder = null
+		Sfx.play("step", -10.0)
+		return
+	if y <= l.global_position.y and f < 0.0:
+		global_position = l.bottom_exit()
+		global_position.y = l.global_position.y
+		ladder = null
+		return
+	global_position = l.climb_point(y)
+	if absf(f) > 0.1:
+		_climb_snd -= dt
+		if _climb_snd <= 0.0:
+			_climb_snd = 0.32
+			Sfx.play("impact_metal", -18.0, 0.15)
+			step_phase += 0.5
+
+
+## Crawling through sheet-metal ducts carries: guards close by hear something.
+func _duct_noise(dt: float) -> void:
+	if not game.facility.in_duct(global_position) or speed_2d() < 0.4:
+		return
+	_duct_snd -= dt
+	if _duct_snd > 0.0:
+		return
+	_duct_snd = 0.45
+	Sfx.play_at("impact_metal", global_position + Vector3.UP * 0.5, -14.0, false, 0.3)
+	for s in game.soldiers:
+		if s.alive and s.state == Soldier.State.CALM and s.global_position.distance_to(global_position) < 7.0:
+			s.make_suspicious(global_position, 0.35, "noise", 0.6)
 
 
 func _start_vault() -> void:

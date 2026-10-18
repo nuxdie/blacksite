@@ -80,7 +80,8 @@ var stuck_pos := Vector3.ZERO
 var repath := 0.0
 ## A job security sent this guard to do: walk to pos and work on device.
 var task: Dictionary = {}
-var carries_badge := false
+## Access levels on this guard's badge; dropped on death, and readable up close.
+var badge: Array[String] = []
 ## Radio identity, and where they're supposed to be standing.
 var callsign := ""
 var call_order := 0
@@ -88,8 +89,12 @@ var post := Vector3.ZERO
 var post_yaw := 0.0
 ## HQ already knows this one is gone (missed a check, or the body was found).
 var accounted := false
+## Why their awareness of you last went up: seen, lit, close, heard. Shown so you know why.
+var notice := ""
 ## A hit to the legs slows them for good.
 var limp := 1.0
+## Climbing a ladder along a navigation link: {ladder, to_y, exit}.
+var climb: Dictionary = {}
 ## Seconds left on a radio call to HQ (hand on the radio); killing them now stops it.
 var radio_t := 0.0
 
@@ -118,7 +123,7 @@ func setup(p_profile: SoldierProfile, p_squad: Squad, pos: Vector3, p_yaw: float
 
 func _ready() -> void:
 	collision_layer = Layers.SOLDIERS
-	collision_mask = Layers.WORLD | Layers.PLAYER | Layers.SOLDIERS
+	collision_mask = Layers.WORLD | Layers.PLAYER | Layers.SOLDIERS | Layers.RAILING
 	floor_snap_length = 0.4
 	floor_max_angle = deg_to_rad(46.0)
 	model.build(profile)
@@ -127,6 +132,7 @@ func _ready() -> void:
 	agent.radius = 0.4
 	agent.height = 1.8
 	agent.path_max_distance = 3.0
+	agent.link_reached.connect(_on_link)
 
 
 # ------------------------------------------------------------------ geometry helpers
@@ -177,6 +183,31 @@ func face(p: Vector3, rate: float, dt: float) -> void:
 
 func say(kind: String, force := false) -> void:
 	game.say(self, kind, force)
+
+
+# ------------------------------------------------------------------ ladders
+
+func _on_link(details: Dictionary) -> void:
+	var owner_node: Object = details.get("owner")
+	if owner_node == null or not owner_node.has_meta("ladder"):
+		return
+	var l: Ladder = owner_node.get_meta("ladder")
+	var exit: Vector3 = details.get("link_exit_position", l.top_exit)
+	var up := exit.y > global_position.y + 0.5
+	climb = {"ladder": l, "to_y": l.top_y() if up else l.global_position.y, "exit": l.top_exit if up else l.bottom_exit(), "up": up}
+	global_position = l.climb_point(global_position.y if up else l.top_y() - 0.9)
+
+
+func _climb(dt: float) -> void:
+	var l: Ladder = climb.ladder
+	var y := move_toward(global_position.y, float(climb.to_y), Ladder.CLIMB_SPEED * 0.85 * dt)
+	global_position = l.climb_point(y)
+	velocity = Vector3.ZERO
+	yaw = yaw_of(-l.normal)
+	if absf(y - float(climb.to_y)) < 0.02:
+		global_position = climb.exit
+		climb = {}
+		repath = 0.0
 
 
 # ------------------------------------------------------------------ navigation
@@ -282,14 +313,20 @@ func _perceive(dt: float) -> void:
 		var rate := 1.9 / (1.0 + dist_p / 8.0) * stance * move * center * exposure * game.player_light * game.hq.vigilance()
 		aware += rate * dt * (1.5 if state == State.SUSPICIOUS else 1.0) + (dt * 2.0 if dist_p < 3.5 else 0.0)
 		investigate = p.global_position
+		notice = "lit" if game.player_light >= 0.7 else ("close" if dist_p < 6.0 else "seen")
 	else:
 		aware = maxf(0.0, aware - dt * 0.06)
+		if aware < 0.05:
+			notice = ""
 	var loud := 11.0 if p.sprinting else (0.0 if p.crouched else (4.0 if p.speed_2d() > 1.0 else 0.0))
 	if game.hq.level == Command.Level.ALARM:
 		loud *= 0.5
 	if loud > 0.0 and global_position.distance_to(p.global_position) < loud:
-		aware += dt * 0.6
-		investigate = p.global_position
+		# footsteps carry half as far through a wall
+		if sees_head or sees_chest or global_position.distance_to(p.global_position) < loud * 0.5:
+			aware += dt * 0.6
+			investigate = p.global_position
+			notice = "heard"
 	if aware >= 1.0:
 		alert(p.global_position, "saw")
 	elif aware > 0.4 and state == State.CALM:
@@ -344,6 +381,13 @@ func tick(dt: float) -> void:
 		if blind <= 0.0:
 			think_t = 0.0
 			aim_err = 0.2
+	elif not climb.is_empty():
+		_perceive(dt)
+		_climb(dt)
+		crouch_k = 0.0
+		model.rotation.y = yaw
+		model.animate(dt, self)
+		return
 	else:
 		_perceive(dt)
 		if not task.is_empty() and state == State.COMBAT:
@@ -471,11 +515,15 @@ func assign_task(pos: Vector3, device: Device, work: float) -> void:
 		say("repair")
 
 
+## Dropped the job (combat, death): it goes back on the list for someone else later.
 func cancel_task() -> void:
 	if task.is_empty():
 		return
-	(task.device as Device).repair_pending = false
+	var dv: Device = task.device
+	dv.repair_pending = false
 	task = {}
+	if dv.kind != Device.Kind.LAPTOP:
+		game.requeue_repair(dv)
 
 
 func _do_task(dt: float) -> void:
@@ -885,7 +933,9 @@ func load_state(d: Dictionary) -> void:
 	tag_seen = d.tag_seen
 	mag = d.mag
 	limp = d.limp
-	carries_badge = d.badge
+	badge.clear()
+	for a: String in d.badge:
+		badge.append(a)
 	model.rotation.y = yaw
 	if not d.alive:
 		alive = false

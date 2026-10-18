@@ -36,6 +36,16 @@ assets/fonts/            Rajdhani (SIL OFL, see OFL.txt)
 ## Systems at a glance
 
 - **Insertion**: you start outside the west wall and go in through a breach; extraction is back out the same hole.
+- **Zones and routes**: every area has a job, and most have more than one way in.
+  - *Loading yard*: insertion, vehicles for cover, a watchtower with a guard and a sweeping searchlight, a ladder onto a container for a perch, and a crate to get over the wall into the main yard.
+  - *Gatehouse*: the security booth, its badge holder and the camera terminal.
+  - *Main yard*: the open crossing, patrolled and lit.
+  - *Office*: the server room (office access, maglock, or crawl in through a vent duct from the west alley), the armoury (security access, or drop in through the roof hatch), and the comms relay on the roof, reached by stairs.
+  - *Warehouse*: the objective. The loading doors are open but lit; the south and north doors take a warehouse badge; a fire escape climbs the east alley to the mezzanine; catwalks cross the bay, with a ladder up from the floor. The data office needs secure access, or a climb through its window.
+  - *Outside the wire*: a dark perimeter path to a crawl-through culvert under the north wall.
+- **Doors**: RFID readers with access levels taken from guards' badges. Cutting a zone's power opens maglock doors and kills strike-locked readers. Guards badge through, so you can follow one.
+- **Vertical travel**: stairs and catwalks for everyone; ladders climbed with the interact key, and by guards along navigation links; ducts are crouch-only and loud on sheet metal.
+- **Fair detection**: light only counts if it reaches you (walls block lamps, flashlights and the searchlight); closed doors and grilles block sight; footsteps carry half as far through walls. The status line always says why you are being noticed: lit, too close, in view, too loud, or on camera.
 - **Sights**: no crosshair. Each gun is modelled so its sight line is exact: red dot (MK4), holographic ring (K7), 3-dot tritium night sights (P9), AK notch and post, LMG peep, shotgun bead, and a 4x scope whose eye-box shadow drifts when you move or breathe.
 - **Weapon handling**: closed-bolt guns keep one in the chamber on a tactical reload (30+1); empty reloads need the bolt worked. The pistol slide locks back empty. The shotgun is pumped after every shot and loads shell by shell; firing stops the reload.
 - **Wounds**: nothing regenerates. Hits bleed until you bandage (T); a leg hit stops you running until a medkit splints it.

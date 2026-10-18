@@ -5,3 +5,5 @@ const WORLD := 1
 const PLAYER := 2
 const SOLDIERS := 4
 const GADGETS := 8
+## Handrails: stop bodies from walking off catwalks, but bullets and eyes pass through.
+const RAILING := 16

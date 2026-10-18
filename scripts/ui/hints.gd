@@ -23,7 +23,7 @@ var defs: Array[Dictionary] = [
 	{"id": "lights", "keys": [], "text": "You're lit up. Lamps can be shot out", "trigger": "lit_near_guards", "info": true},
 	{"id": "cameras", "keys": [], "text": "Cameras are wired to a security network — get to an access point to deal with them", "trigger": "camera_in_view", "info": true},
 	{"id": "network", "keys": [], "text": "Junction boxes, the server cabinet and the booth terminal all reach the camera network", "trigger": "access_near", "info": true},
-	{"id": "badge", "keys": [], "text": "A security badge logs you in cleanly — no trace", "trigger": "badge", "info": true},
+	{"id": "badge", "keys": [], "text": "Badges open doors at their access level. A security badge also logs into the cameras without a trace", "trigger": "badge", "info": true},
 	{"id": "relay", "keys": [], "text": "Their radio runs through the relay on the office roof. Sabotage it and alarms go nowhere — until someone fixes it", "trigger": "camera_alarm", "info": true},
 	{"id": "lean", "keys": ["lean_left", "lean_right"], "text": "Lean out from cover", "trigger": "combat"},
 	{"id": "sprint", "keys": ["sprint"], "text": "Sprint — guards hear it", "trigger": "late_quiet"},

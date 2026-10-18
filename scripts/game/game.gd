@@ -12,7 +12,8 @@ const ROSTER := [
 	{"squad": "yard", "type": "rifleman", "pos": Vector3(-22, 0, -14), "patrol": [[-22, -14], [-9, -1], [2, -12], [-12, -14]]},
 	{"squad": "yard", "type": "rifleman", "pos": Vector3(-10, 0, -5), "yaw": 0.0},
 	{"squad": "yard", "type": "rifleman", "pos": Vector3(-14, 3.7, 14), "yaw": 0.0},
-	{"squad": "yard", "type": "rifleman", "pos": Vector3(-12.5, 0, -17.5), "yaw": 0.45, "badge": true},
+	{"squad": "yard", "type": "rifleman", "pos": Vector3(-12.5, 0, -17.5), "yaw": 0.45, "access": ["security"]},
+	{"squad": "yard", "type": "rifleman", "pos": Vector3(7.5, 4.5, -34.3), "yaw": 0.9},
 	{"squad": "office", "type": "breacher", "pos": Vector3(-27, 0, 21.2), "patrol": [[-27, 21.2], [-3, 21.2]]},
 	{"squad": "office", "type": "rifleman", "pos": Vector3(-15, 0, 27.5), "yaw": 0.0},
 	{"squad": "office", "type": "rifleman", "pos": Vector3(-22, 0, 15), "yaw": -PI / 2},
@@ -20,7 +21,7 @@ const ROSTER := [
 	{"squad": "wh", "type": "rifleman", "pos": Vector3(14, 0, -15), "patrol": [[14, -15], [36, -17], [36, 18], [16, 18]]},
 	{"squad": "wh", "type": "rifleman", "pos": Vector3(14, 0, 4), "yaw": -PI / 2},
 	{"squad": "wh", "type": "breacher", "pos": Vector3(26, 0, -9), "yaw": -PI / 2},
-	{"squad": "wh", "type": "heavy", "pos": Vector3(28, 4.2, 26), "yaw": 0.0},
+	{"squad": "wh", "type": "heavy", "pos": Vector3(28, 4.2, 26), "yaw": 0.0, "access": ["warehouse", "secure"]},
 	{"squad": "wh", "type": "rifleman", "pos": Vector3(44, 4.2, 2), "yaw": -PI / 2},
 	{"squad": "wh", "type": "rifleman", "pos": Vector3(42.5, 4.2, 27), "yaw": 0.0},
 ]
@@ -65,7 +66,17 @@ var _beacon: Node3D
 var _test: TestRunner
 var _shot_hit := false
 var comms_down := false
-var has_badge := false
+## Access levels on the credentials you hold (taken or cloned badges).
+var access: Dictionary = {}
+## Security-level access: clean admin logins on the camera network.
+var has_badge: bool:
+	get:
+		return access.has("security")
+	set(v):
+		if v:
+			access["security"] = true
+		else:
+			access.erase("security")
 var trace := 0.0
 var tablet_access: Device = null
 var tablet_admin := false
@@ -167,7 +178,7 @@ func start_mission() -> void:
 	detected = false
 	reinforce_t = -1.0
 	comms_down = false
-	has_badge = false
+	access.clear()
 	trace = 0.0
 	tablet_access = null
 	player.in_tablet = false
@@ -218,7 +229,10 @@ func _spawn(r: Dictionary) -> Soldier:
 		squads[sq_id] = Squad.new(sq_id)
 	s.game = self
 	s.setup(load("res://resources/soldiers/%s.tres" % r.type), squads[sq_id], r.pos, r.get("yaw", 0.0), r.get("patrol", []))
-	s.carries_badge = r.get("badge", false)
+	var default_access := {"yard": [], "office": ["office"], "wh": ["warehouse"], "qrf": ["security", "warehouse", "office"]}
+	var acc: Array = r.get("access", default_access.get(sq_id, []))
+	for a: String in acc:
+		s.badge.append(a)
 	var sq_n := (squads[sq_id] as Squad).members.size()
 	s.callsign = "%s %d" % [{"yard": "Gate", "office": "Office", "wh": "Warehouse", "qrf": "Reaction"}.get(sq_id, "Post"), sq_n]
 	s.call_order = soldiers.size()
@@ -364,7 +378,7 @@ func _process(dt: float) -> void:
 
 
 func _flashlights() -> Array:
-	var out := []
+	var out: Array = facility.searchlights.filter(func(sl: SpotLight3D) -> bool: return sl.visible)
 	for s in soldiers:
 		if s.alive and s.model.flashlight.visible:
 			out.append(s.model.flashlight)
@@ -822,9 +836,38 @@ func find_use_target() -> Device:
 	return best
 
 
+## A ladder you can get on from where you stand: at its foot, or at the top edge.
+func ladder_near() -> Ladder:
+	if not player.alive or player.ladder or player.drag_body:
+		return null
+	var p := player.global_position
+	for l in facility.ladders:
+		var foot := l.climb_point(l.global_position.y)
+		if absf(p.y - l.global_position.y) < 0.6 and Vector2(p.x - foot.x, p.z - foot.z).length() < 0.9:
+			return l
+		if absf(p.y - l.top_y()) < 0.6 and Vector2(p.x - l.top_exit.x, p.z - l.top_exit.z).length() < 1.0:
+			return l
+	return null
+
+
+func has_access(level: String) -> bool:
+	return access.has(level)
+
+
+## A door at the player's feet that won't open for them.
+func refused_door() -> Door:
+	for d in facility.doors:
+		if d.refused:
+			return d
+	return null
+
+
 func _tick_devices(dt: float) -> void:
 	for dv in facility.devices:
 		dv.tick(dt, self)
+	for d in facility.doors:
+		d.tick(dt, self)
+	facility.tick_searchlights(dt)
 	trace = maxf(0.0, trace - dt * (0.4 if tablet_access else 1.5))
 	use_target = find_use_target()
 	using = false
@@ -978,6 +1021,12 @@ func set_zone_power(breaker: Device, on: bool) -> void:
 				l.power_on()
 			else:
 				l.power_off()
+	for d in facility.doors:
+		if d.zone == breaker.zone:
+			d.powered = on
+	for sl in facility.searchlights:
+		if sl.get_meta("zone") == breaker.zone:
+			sl.visible = on
 	_light_t = 0.0
 	if on:
 		return
@@ -995,6 +1044,10 @@ func _zone_of(p: Vector3) -> String:
 func _schedule_repair(dv: Device, delay: float) -> void:
 	_repairs.append({"device": dv, "t": time + delay})
 	hq.caution("device")
+
+
+func requeue_repair(dv: Device) -> void:
+	_repairs.append({"device": dv, "t": time + 15.0})
 
 
 ## HQ sends the nearest guards to a contact.
@@ -1210,9 +1263,14 @@ func _tick_pickups() -> void:
 		if p.taken or not p.is_auto() or p.global_position.distance_to(player.global_position) > 1.3:
 			continue
 		if p.kind == Pickup.Kind.BADGE:
-			has_badge = true
-			hud.toast("SECURITY BADGE  ·  ADMIN ACCESS")
+			var new_levels := p.access.filter(func(a: String) -> bool: return not access.has(a))
+			if new_levels.is_empty():
+				continue
+			for a: String in p.access:
+				access[a] = true
+			hud.toast("BADGE  ·  " + "  ·  ".join(new_levels.map(func(a: String) -> String: return a.to_upper())) + " ACCESS")
 			hud.hint_event("badge")
+			Sfx.play("pickup")
 		elif p.kind == Pickup.Kind.ROUNDS:
 			var used := player.weapons.take_rounds(p.caliber, p.amount)
 			if used == 0:
@@ -1279,8 +1337,8 @@ func on_soldier_killed(s: Soldier, headshot: bool, takedown: bool) -> void:
 	var side := Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5))
 	facility.place(Pickup.dropped_weapon(s.global_position + side, data, clampi(s.mag, 0, data.mag_size), []))
 	facility.place(Pickup.rounds(s.global_position - side * 0.6, data.caliber, s.profile.carried_rounds))
-	if s.carries_badge:
-		facility.add_pickup(Pickup.Kind.BADGE, s.global_position + Vector3(-0.3, 0, 0.3), 1, false)
+	if not s.badge.is_empty():
+		facility.place(Pickup.badge(s.global_position + Vector3(-0.3, 0, 0.3), s.badge))
 	if s.grenades > 0 and randf() < 0.6:
 		facility.add_pickup(Pickup.Kind.FRAG, s.global_position + Vector3(0.3, 0, 0.2), 1, false)
 	if not takedown:
