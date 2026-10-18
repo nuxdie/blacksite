@@ -118,6 +118,8 @@ func ramp(x0: float, z0: float, x1: float, z1: float, base: float, top: float, a
 	body.add_child(cs)
 	if show:
 		body.add_child(mi)
+	else:
+		mi.free()  # never in the tree, so never freed with it
 	body.set_meta("mat", "steel")
 	body.set_meta("pen", 0.0)
 	nav_region.add_child(body)

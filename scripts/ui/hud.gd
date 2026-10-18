@@ -330,7 +330,8 @@ func _draw_overlay() -> void:
 	if game.tablet_access:
 		_draw_tablet(size)
 	_draw_place(size)
-	_draw_heading(size)
+	if not game.tablet_access:
+		_draw_heading(size)
 	_draw_attention(size)
 	_draw_markers()
 	if not game.tablet_access:

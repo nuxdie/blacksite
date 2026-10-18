@@ -2,5 +2,6 @@
 .godot/
 /android/
 *.translation
-export_presets.cfg
+# export_presets.cfg is committed: the Linux preset has no secrets
 build/
+dist/

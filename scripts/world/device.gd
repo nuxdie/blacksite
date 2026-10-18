@@ -578,7 +578,7 @@ func cut_power(game: Game) -> void:
 	for w in _wires:
 		w.visible = false
 	game.fx.burst("spark", global_position + Vector3(0, -0.13, -0.1))
-	Sfx.play_at("impact_metal", global_position, -12.0, true, 1.6)
+	Sfx.play_at("impact_metal", global_position, -12.0, true, 0.15)
 	game.set_zone_power(self, false)
 
 

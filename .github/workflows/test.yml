@@ -1,0 +1,38 @@
+name: Test
+
+# Every push runs the in-engine autotest headless, the same check the release build gets.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  autotest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Godot
+        run: |
+          set -eu
+          curl -fsSL -o /tmp/godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp && mv /tmp/Godot_v${GODOT_VERSION}-stable_linux.x86_64 /usr/local/bin/godot
+      - run: godot --headless --path . --import
+      - name: Autotest
+        run: |
+          set -o pipefail
+          timeout 900 godot --headless --path . -- --autotest | tee autotest.log | grep '^AUTOTEST ' > result.json
+          python3 - <<'PY'
+          import json
+          d = json.loads(open("result.json").read().split(" ", 1)[1])
+          print(json.dumps(d, indent=1)[:4000])
+          bad = [k for k, v in d.get("audio", {}).items() if k == "missing_lines" and v]
+          assert not bad, bad
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: autotest-log
+          path: autotest.log

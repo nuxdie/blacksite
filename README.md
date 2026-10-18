@@ -1,6 +1,67 @@
-# Blacksite
+<p align="center">
+  <img src="docs/media/banner.png" alt="Blacksite" width="800">
+</p>
+
+<p align="center">
+  <a href="https://github.com/nuxdie/blacksite/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/nuxdie/blacksite?style=flat-square&color=ffb84a&labelColor=0b0f16"></a>
+  <a href="https://github.com/nuxdie/blacksite/actions/workflows/test.yml"><img alt="Autotest" src="https://img.shields.io/github/actions/workflow/status/nuxdie/blacksite/test.yml?style=flat-square&label=autotest&labelColor=0b0f16"></a>
+  <img alt="Godot 4.7" src="https://img.shields.io/badge/Godot-4.7-478cbf?style=flat-square&labelColor=0b0f16">
+  <img alt="Linux" src="https://img.shields.io/badge/Linux-x86__64-e8edf1?style=flat-square&labelColor=0b0f16">
+</p>
 
 A tactical stealth shooter in Godot 4.7. One operator, one night: recover a drive from a guarded compound and get out.
+
+It is slow and lethal. Guards build awareness from light, distance, movement and sound, and radio each other on a net that HQ runs. Nothing regenerates, nothing is hacked through the air, and every consequence lasts the rest of the night. No crosshair, no hitmarkers, no controls screen: the keys appear when they matter.
+
+<table>
+  <tr>
+    <td><img src="docs/media/noticed.gif" alt="A guard notices you standing in the light and calls it in"></td>
+    <td><img src="docs/media/deck.gif" alt="The operator deck: nmap over the security network, then a camera feed"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Standing in the light. The arcs show who is noticing you and the line says why. Then the call goes out.</sub></td>
+    <td align="center"><sub>Cable the nettop to a port, map what is on the line, and ride a camera.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/smoke.gif" alt="Throwing a smoke grenade with the arc preview"></td>
+    <td><img src="docs/media/truck.gif" alt="Riding out through the vehicle gate flat in the back of the delivery truck"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Equipment is thrown off an arc preview. Smoke is a real volume that blocks their sight, not their bullets.</sub></td>
+    <td align="center"><sub>The delivery truck comes and goes through the vehicle gate. Lie flat in the bed and it carries you out.</sub></td>
+  </tr>
+</table>
+
+## Download
+
+Linux x86_64 builds are on the [releases page](https://github.com/nuxdie/blacksite/releases/latest). Unpack and run `./blacksite`. The first launch synthesizes the sound bank, which takes a few seconds. Settings and quicksaves live under `~/.local/share/godot/app_userdata/Blacksite/`.
+
+Every tag that starts with `v` is built by GitHub Actions ([release.yml](.github/workflows/release.yml)) from a clean checkout: it downloads Godot and the export templates, exports the Linux preset, runs the in-engine autotest against the exported binary, and attaches the archive to the release. Every push to `main` runs the same autotest ([test.yml](.github/workflows/test.yml)).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/media/yard.jpg" alt="The loading yard: the watchtower, a delivery truck, the security booth"></td>
+    <td><img src="docs/media/tower.jpg" alt="The warehouse from under the watchtower"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/drone.jpg" alt="A security drone locked on overhead, two guards at the gatehouse"></td>
+    <td><img src="docs/media/warehouse.jpg" alt="Inside the warehouse: catwalks over the bay"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/catwalk.jpg" alt="On the catwalk above the bay"></td>
+    <td><img src="docs/media/roof.jpg" alt="The office roof and the comms relay"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/scope.jpg" alt="The 4x scope on the marksman rifle with a guard in the reticle"></td>
+    <td><img src="docs/media/cover.jpg" alt="An outdoor junction box with its cover unscrewed and the installer's login note inside"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/deck.png" alt="The operator deck after nmap, with the camera feed and host list"></td>
+    <td><img src="docs/media/title.png" alt="The title screen: primary weapon and two pieces of equipment"></td>
+  </tr>
+</table>
 
 ## Run
 
@@ -33,6 +94,9 @@ resources/soldiers/      rifleman, heavy, breacher (.tres — tune here)
 assets/fonts/            Rajdhani (SIL OFL, see OFL.txt)
 assets/voice/            lines.json (every spoken line) and the rendered takes, one folder per voice
 tools/voices/            render.py: regenerates assets/voice with Piper (see below)
+tools/media/             banner.py (logo and banner) and build.sh (README stills and GIFs from a --media capture)
+docs/media/              the images this README shows
+.github/workflows/       test.yml runs the autotest on every push; release.yml builds the Linux export for tags
 ```
 
 ## Interface
@@ -100,6 +164,17 @@ Needs `sox` and `ffmpeg`. Existing takes are skipped, so delete a file to re-ren
 $GODOT --headless --path . -- --autotest   # gameplay assertions, prints JSON
 $GODOT --headless --path . -- --sim=60     # combat bot vs the AI for 60 s
 $GODOT --path . -- --shots=/tmp/shots      # rendered screenshots at fixed viewpoints
+$GODOT --path . -- --media=/tmp/media      # README stills and clips; then tools/media/build.sh /tmp/media
 ```
 
 Test runs never write to your saved settings.
+
+## Building
+
+The Linux export preset is in `export_presets.cfg`. With the 4.7.2 export templates installed:
+
+```sh
+$GODOT --headless --path . --export-release "Linux" build/linux/blacksite.x86_64
+```
+
+The voice takes under `assets/voice` are kept out of Godot's import (the folder is `.gdignore`'d, so the editor doesn't churn through four hundred files) and are therefore not inside the exported pack. The game looks for them next to the executable when they are missing from `res://`, so a shipped build is the binary plus an `assets/voice` folder beside it, which is what the release workflow packages. Other platforms have no preset yet; adding one is a matter of a new entry in `export_presets.cfg` and a matching job in the release workflow.

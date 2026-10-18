@@ -149,13 +149,13 @@ func _build() -> void:
 			stock.material_override = furn
 			stock.position = Vector3(0, -0.02, len * 0.5 + 0.08)
 			root.add_child(stock)
-			var mag := MeshInstance3D.new()
-			var mb := BoxMesh.new()
-			mb.size = Vector3(0.05, 0.16, 0.12) if weapon.id == "lmg" else Vector3(0.035, 0.14, 0.06)
-			mag.mesh = mb
-			mag.material_override = dark
-			mag.position = Vector3(0, -0.11, -0.05)
-			if weapon.id != "shotgun":
+			if weapon.id != "shotgun":  # a shotgun has no box magazine; build none rather than an orphan
+				var mag := MeshInstance3D.new()
+				var mb := BoxMesh.new()
+				mb.size = Vector3(0.05, 0.16, 0.12) if weapon.id == "lmg" else Vector3(0.035, 0.14, 0.06)
+				mag.mesh = mb
+				mag.material_override = dark
+				mag.position = Vector3(0, -0.11, -0.05)
 				root.add_child(mag)
 
 

@@ -4,6 +4,7 @@ extends Node
 ##   --autotest          run gameplay checks and print results as JSON, then quit
 ##   --shots=<dir>       capture screenshots at fixed viewpoints (needs a window)
 ##   --uishots=<dir>     capture the HUD in a series of game states (needs a window)
+##   --media=<dir>       stills and frame sequences for the README (needs a window; see tools/media)
 ##   --sim=<seconds>     run a combat bot for that long and report
 ##   --test=<name>       run one check (consequences, security, drones, fairness, ...) and print it
 
@@ -25,6 +26,8 @@ func start() -> void:
 		await _shots(_args["shots"])
 	if _args.has("uishots"):
 		await _ui_shots(_args["uishots"])
+	if _args.has("media"):
+		await _media(_args["media"])
 	if _args.has("map"):
 		await _map(_args["map"])
 	if _args.has("boxes"):
@@ -1310,6 +1313,203 @@ func _shots(dir: String) -> void:
 	_snap(dir + "/nettop.png")
 	junction.plug(false)
 	await _sight_shots(dir)
+
+
+## Stills and clips for the README, with the site quiet and no tips in the frame.
+## Clips are frame sequences at a fixed game-time rate; tools/media/build.sh turns them into GIFs.
+func _media(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	await get_tree().process_frame
+	await get_tree().create_timer(0.5).timeout
+	_snap(dir + "/title.png")
+	await _fresh("carbine")
+	for d: Dictionary in game.hud.hints.defs:
+		Settings.learn(d.id)
+	game.hud.hints.reset()
+	var stills := [
+		["yard", Vector3(-20, 0, -26), -PI / 2, 0.0],
+		["tower", Vector3(-2, 0, -27), -PI * 0.62, 0.12],
+		["gate", Vector3(-11, 0, -24), PI, 0.02],
+		["warehouse", Vector3(12, 0, -10), PI + 0.3, 0.0],
+		["catwalk", Vector3(12.5, 4.2, 6.8), -PI / 2, -0.15],
+		["roof", Vector3(-2, 3.7, 14), 1.2, -0.2],
+	]
+	for v: Array in stills:
+		_freeze_guards()
+		game.player.global_position = v[1]
+		game.player.yaw = v[2]
+		game.player.pitch = v[3]
+		await get_tree().create_timer(0.6).timeout
+		_snap("%s/%s.png" % [dir, v[0]])
+	# a drone locked on, red LED, light cone on the ground
+	_freeze_guards()
+	var dr: Drone = game.facility.drones[0]
+	dr.position = Vector3(-10, 5.6, -4)
+	dr.mode = Drone.Mode.TRACK
+	dr._led.emission = Color("ff3020")
+	game.player.global_position = Vector3(-10, 0, 2)
+	game.player.yaw = 0.0
+	game.player.pitch = 0.45
+	await get_tree().create_timer(0.6).timeout
+	_snap(dir + "/drone.png")
+	# the scope
+	Settings.primary = "dmr"
+	await _fresh("dmr")
+	for d: Dictionary in game.hud.hints.defs:
+		Settings.learn(d.id)
+	_freeze_guards()
+	game.player.global_position = Vector3(-11, 0, -24)
+	game.player.yaw = PI
+	Input.action_press("aim")
+	await get_tree().create_timer(0.8).timeout
+	_snap(dir + "/scope.png")
+	Input.action_release("aim")
+	# the deck, logged in with a badge, nmap done and a camera feed up
+	game.has_badge = true
+	var term := _device("SECURITY TERMINAL")
+	game.player.global_position = Vector3(-12.5, 0, -17.2)
+	await get_tree().create_timer(0.2).timeout
+	_look_at(term.use_point())
+	term.on_used(game)
+	await get_tree().create_timer(0.3).timeout
+	game.console.finish_login()
+	await _console("nmap")
+	await _console("cam cam-01")
+	await get_tree().create_timer(0.5).timeout
+	_snap(dir + "/deck.png")
+	game.close_tablet()
+	game.has_badge = false
+	# the box cover with the installer's note
+	var junction := _device("JUNCTION BOX")
+	game.player.global_position = junction.use_point() + Vector3(0.35, -1.3, -1.1)
+	await get_tree().create_timer(0.2).timeout
+	junction.creds_known = true
+	junction.on_used(game)
+	await get_tree().create_timer(1.0).timeout
+	_look_at(junction.sticker_pos())
+	await get_tree().create_timer(0.2).timeout
+	_snap(dir + "/cover.png")
+	game.close_tablet()
+	# ---- clips
+	Engine.time_scale = 0.25
+	# a guard notices you standing in the light, and calls it in
+	await _fresh("carbine")
+	for d: Dictionary in game.hud.hints.defs:
+		Settings.learn(d.id)
+	_ground_drones()
+	var g := _find("yard", -10.0)
+	_isolate([g, _find("yard", -22.0), _find("yard", -12.5)])
+	game.player.global_position = Vector3(-17, 0, -12)
+	_look_at(g.head_pos())
+	g.yaw = atan2(-(game.player.global_position.x - g.global_position.x), -(game.player.global_position.z - g.global_position.z))
+	g.look_yaw = g.yaw
+	g.look_t = 30.0
+	g.aware = 0.0
+	g.perc_t = 0.0
+	await _clip(dir, "noticed", 10.0)
+	# the deck: nmap typed and run, then a camera feed
+	await _fresh("carbine")
+	for d: Dictionary in game.hud.hints.defs:
+		Settings.learn(d.id)
+	_freeze_guards()
+	_ground_drones()
+	game.has_badge = true
+	game.player.global_position = Vector3(-12.5, 0, -17.2)
+	await get_tree().create_timer(0.2).timeout
+	_look_at(term.use_point())
+	term.on_used(game)
+	await get_tree().create_timer(0.3).timeout
+	game.console.finish_login()
+	var typing := func(cmd: String, hold: float) -> void:
+		for i in cmd.length():
+			game.console.input = cmd.substr(0, i + 1)
+			await get_tree().create_timer(0.09).timeout
+		await get_tree().create_timer(0.25).timeout
+		game.console.submit()
+		await get_tree().create_timer(hold).timeout
+	var script := func() -> void:
+		await get_tree().create_timer(0.8).timeout
+		await typing.call("nmap", 4.0)
+		await typing.call("cam cam-01", 3.0)
+		await typing.call("loop cam-01", 2.0)
+	script.call()
+	await _clip(dir, "deck", 14.0)
+	game.close_tablet()
+	game.has_badge = false
+	# a smoke grenade: the arc, the throw, the cloud
+	await _fresh("carbine")
+	for d: Dictionary in game.hud.hints.defs:
+		Settings.learn(d.id)
+	_freeze_guards()
+	_ground_drones()
+	game.player.global_position = Vector3(-26, 0, -18)
+	game.player.yaw = PI * 0.75
+	game.player.pitch = 0.1
+	game.player.weapons.cycle_gadget()
+	var throwing := func() -> void:
+		await get_tree().create_timer(0.6).timeout
+		game.player.weapons.begin_throw()
+		await get_tree().create_timer(1.6).timeout
+		game.player.weapons.release_throw()
+	throwing.call()
+	await _clip(dir, "smoke", 8.0)
+	# out through the gate in the back of the delivery truck
+	await _fresh("carbine")
+	for d: Dictionary in game.hud.hints.defs:
+		Settings.learn(d.id)
+	_freeze_guards()
+	_ground_drones()
+	var t: Truck = game.facility.vehicles[0]
+	game.player.global_position = Vector3(-16, 0, -8)
+	t.next_t = 0.2
+	var frames := 0
+	while t.state != Truck.State.LOADING and frames < 60 * 90 * 4:
+		await get_tree().physics_frame
+		frames += 1
+	_freeze_guards()
+	game.player.global_position = t.bed_point()
+	game.player.prone_toggle = true
+	game.player.yaw = atan2(-t.forward().x, -t.forward().z) + PI
+	game.player.pitch = 0.1
+	await _frames(20)
+	t.load_t = 0.3
+	game.mission = "extract"
+	frames = 0
+	while not t.moving() and frames < 60 * 20:
+		await get_tree().physics_frame
+		frames += 1
+	await _clip(dir, "truck", 9.0)
+	Engine.time_scale = 1.0
+
+
+func _ground_drones() -> void:
+	for dr in game.facility.drones:
+		dr.recall(3600.0)
+
+
+## Guards keep whatever they last perceived, so a teleported player doesn't start an alarm.
+func _freeze_guards() -> void:
+	for s in game.soldiers:
+		s.perc_t = 1000.0
+		s.aware = 0.0
+		s.state = Soldier.State.CALM
+		s.sees = false
+
+
+## Frames of the next few seconds of game time, numbered, at a fixed rate; the engine is slowed
+## down beforehand so saving each frame doesn't cost the clip any motion.
+func _clip(dir: String, name: String, seconds: float, fps := 20) -> void:
+	DirAccess.make_dir_recursive_absolute("%s/%s" % [dir, name])
+	await _frames(6)
+	await get_tree().process_frame
+	var t0 := game.time
+	var i := 0
+	while game.time - t0 < seconds:
+		await get_tree().process_frame
+		if game.time - t0 >= i / float(fps):
+			get_viewport().get_texture().get_image().save_png("%s/%s/%04d.png" % [dir, name, i])
+			i += 1
+	print("CLIP ", name, " ", i, " frames")
 
 
 ## The interface in the situations it has to make clear.

@@ -10,7 +10,6 @@ extends Node
 ## whether you are noticed or hunted, and interior(), which swaps wind for ventilation indoors.
 
 const CACHE_DIR := "user://sfx_cache_v5/"
-const VOICE_DIR := "res://assets/voice/"
 const WORLD_POOL := 28
 const FLAT_POOL := 10
 const VOICE_POOL := 8
@@ -452,7 +451,7 @@ func voice_path(voice: String, kind: String, index: int, slug := "", radio := fa
 	var name := "%s_%d" % [kind, index]
 	if slug != "":
 		name += "_" + slug
-	var path := "%s%s/%s%s.ogg" % [VOICE_DIR, voice, name, ".r" if radio else ""]
+	var path := "%s%s/%s%s.ogg" % [Lines.voice_root(), voice, name, ".r" if radio else ""]
 	if _voice_missing.has(path):
 		return ""
 	if not _voice_cache.has(path) and not FileAccess.file_exists(path):

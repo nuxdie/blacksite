@@ -4,15 +4,27 @@ extends RefCounted
 ## Guards' lines come in six voices; a guard's voice follows their call order, and a callsign
 ## therefore always answers radio checks in the same voice.
 
-const PATH := "res://assets/voice/lines.json"
-
 static var _data: Dictionary = {}
+static var _root := ""
+
+
+## Where the catalogue and the takes live. The folder is .gdignore'd (so the editor never imports
+## four hundred ogg files) and is therefore not inside an exported pack: a shipped build carries
+## it next to the executable instead.
+static func voice_root() -> String:
+	if _root == "":
+		_root = "res://assets/voice/"
+		if not FileAccess.file_exists(_root + "lines.json"):
+			var beside := OS.get_executable_path().get_base_dir().path_join("assets/voice/")
+			if FileAccess.file_exists(beside + "lines.json"):
+				_root = beside
+	return _root
 
 
 static func _load() -> void:
 	if not _data.is_empty():
 		return
-	var f := FileAccess.open(PATH, FileAccess.READ)
+	var f := FileAccess.open(voice_root() + "lines.json", FileAccess.READ)
 	if f == null:
 		_data = {"guard": {}, "hq": {}, "security": {}, "callsigns": [], "voices": {"guards": ["g0"], "hq": "hq", "security": "sec"}}
 		return
