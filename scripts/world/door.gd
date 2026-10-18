@@ -24,6 +24,8 @@ var open_k := 0.0
 var powered := true
 ## Held open from a security console.
 var unlocked := false
+## Smashed off its track by an axe or a blast: it stays open for everyone.
+var broken := false
 ## Set each tick: the player is at this door and it won't open for them.
 var refused := false
 var _body: StaticBody3D
@@ -103,12 +105,23 @@ func reset() -> void:
 	open_k = 0.0
 	powered = true
 	unlocked = false
+	broken = false
+	_panel.rotation = Vector3.ZERO
 	_apply()
+
+
+## Forced: the leaf is knocked askew and the lock means nothing any more.
+func breach() -> void:
+	if broken:
+		return
+	broken = true
+	unlocked = true
+	_panel.rotation = Vector3(0.0, 0.0, 0.07) if axis == "x" else Vector3(0.07, 0.0, 0.0)
 
 
 ## Does the door currently demand a credential?
 func secured() -> bool:
-	if unlocked:
+	if unlocked or broken:
 		return false
 	return not (lock == Lock.MAGLOCK and not powered)
 
@@ -123,7 +136,7 @@ func access_name() -> String:
 
 
 func tick(dt: float, game: Game) -> void:
-	var want := false
+	var want := broken
 	refused = false
 	var c := global_position
 	for s in game.soldiers:

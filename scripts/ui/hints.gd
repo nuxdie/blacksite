@@ -36,6 +36,8 @@ var defs: Array[Dictionary] = [
 	{"id": "gadget", "keys": ["gadget"], "text": "Hold to aim equipment, release to throw", "trigger": "gadget_time"},
 	{"id": "gadget_cycle", "keys": ["gadget_cycle"], "text": "Switch equipment", "trigger": "after_gadget"},
 	{"id": "drag", "keys": ["interact"], "text": "Hold near a body to drag it out of sight", "trigger": "kill"},
+	{"id": "axe", "keys": ["interact"], "text": "The axe breaks down a door whose reader is dead, or smashes a window to climb through — loud either way", "trigger": "axe"},
+	{"id": "through", "keys": ["jump"], "text": "A window with no glass in it is a way in", "trigger": "window_open"},
 	{"id": "calibers", "keys": [], "text": "Guards drop their own weapons. Rounds only fit weapons of the same caliber", "trigger": "scavenge_seen", "info": true},
 	{"id": "fire_mode", "keys": ["fire_mode"], "text": "Semi-auto for long-range control", "trigger": "long_bursts"},
 	{"id": "bleeding", "keys": ["bandage"], "text": "You're bleeding — wounds don't close on their own", "trigger": "bleeding"},
@@ -102,6 +104,8 @@ func _condition(trigger: String) -> bool:
 			return _any(func(s: Soldier) -> bool: return s.state != Soldier.State.COMBAT and s.aware > 0.05)
 		"noticed_or_late":
 			return not p.crouched and (game.time > 14.0 or _any(func(s: Soldier) -> bool: return s.aware > 0.05))
+		"window_open":
+			return p.vault_ok and p.vault_kind == "through"
 		"prone_time":
 			return p.crouched and not p.prone and game.time > 40.0 and _any(func(s: Soldier) -> bool: return s.aware > 0.05)
 		"enemy_visible":

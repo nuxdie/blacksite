@@ -906,23 +906,23 @@ func _prompts() -> Array:
 				out.append([["interact"], a.label + ("  ·  hold" if a.hold else "")])
 			else:
 				out.append([[], a.label])
-		"clone", "splice":
+		"clone", "splice", "breach", "smash":
 			out.append([["interact"], a.label + "  ·  hold"])
 		"drag":
 			out.append([["interact"], a.label])
 	if game.facility.in_duct(p.global_position + p.forward() * 0.9) and not p.crouched and not game.facility.in_duct(p.global_position):
 		out.append([["crouch"], "Crouch to crawl in"])
 	var dr := game.refused_door()
-	if dr and game.act.get("kind") != "splice":
+	if dr and not (game.act.get("kind") in ["splice", "breach"]):
 		if not dr.reader_live():
-			out.append([[], "%s  ·  reader dead, door stays locked" % dr.label])
+			out.append([[], "%s  ·  reader dead, door stays locked  ·  an axe would do it" % dr.label])
 		else:
 			out.append([[], "%s  ·  needs %s access" % [dr.label, dr.access_name()]])
 	var junk := game.useless_rounds_near()
 	if junk:
 		out.append([[], "%s rounds  ·  none of your weapons take them" % junk.caliber])
 	if p.vault_ok:
-		out.append([["jump"], "Climb up" if p.vault_dur > 0.5 else "Vault"])
+		out.append([["jump"], {"vault": "Vault", "climb": "Climb up", "through": "Climb through"}[p.vault_kind]])
 	if p.crouched and p.low_cover_ahead and p.ads < 0.3:
 		out.append([["aim"], "Aim over cover"])
 	if p.is_scoped():

@@ -14,6 +14,7 @@ var devices: Array[Device] = []
 var doors: Array[Door] = []
 var searchlights: Array[SpotLight3D] = []
 var ladders: Array[Ladder] = []
+var panes: Array[Pane] = []
 var drones: Array[Drone] = []
 ## Crawlspaces (axis-aligned boxes) where moving makes a racket on sheet metal.
 var ducts: Array[AABB] = []
@@ -317,6 +318,20 @@ func wall(axis: String, fixed: float, from: float, to: float, thick: float, h: f
 		seg.call(cur, o.a, 0.0, h)
 		seg.call(o.a, o.b, 0.0, o.y0)
 		seg.call(o.a, o.b, o.y1, h)
+		# an opening off the floor is a window: glaze it
+		if o.y0 > 0.5:
+			var c := Vector3(0, base + (o.y0 + o.y1) * 0.5, 0)
+			var sz := Vector3(o.b - o.a, o.y1 - o.y0, 0.02)
+			if axis == "x":
+				c.x = (o.a + o.b) * 0.5
+				c.z = fixed
+			else:
+				c.z = (o.a + o.b) * 0.5
+				c.x = fixed
+				sz = Vector3(0.02, o.y1 - o.y0, o.b - o.a)
+			var pn := Pane.make(c, sz)
+			add_child(pn)
+			panes.append(pn)
 		cur = o.b
 	seg.call(cur, to, 0.0, h)
 
@@ -578,6 +593,7 @@ func _layout() -> void:
 		add_child(mi)
 
 	_vehicles()
+	_fire_points()
 	_furnish()
 	_watchtower()
 	_armory()
@@ -903,6 +919,42 @@ func _door(d: Door) -> void:
 	doors.append(d)
 
 
+## Fire points: a red cabinet on the wall with the axe clipped beside it, an extinguisher at
+## its foot. The axe breaks a dead-reader door or a window; the extinguisher is cover in a can.
+func _fire_points() -> void:
+	_fire_point(Vector3(10.25, 0, -12.0), -PI / 2)
+	_fire_point(Vector3(47.75, 4.2, 16.0), PI / 2, false)
+	_fire_point(Vector3(-29.8, 0, 17.5), -PI / 2)
+
+
+func _fire_point(pos: Vector3, yaw: float, axe := true) -> void:
+	var n := Node3D.new()
+	n.position = pos
+	n.rotation.y = yaw
+	add_child(n)
+	var red := Mats.plain(Color("a81e1e"), 0.5, 0.3)
+	var cab := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.5, 0.7, 0.16)
+	cab.mesh = bm
+	cab.material_override = red
+	cab.position = Vector3(0, 1.3, -0.08)
+	n.add_child(cab)
+	var stripe := MeshInstance3D.new()
+	var sm := BoxMesh.new()
+	sm.size = Vector3(0.4, 0.06, 0.01)
+	stripe.mesh = sm
+	stripe.material_override = Mats.emissive(Color("f0f0f0"), 0.4)
+	stripe.position = Vector3(0, 1.55, -0.165)
+	n.add_child(stripe)
+	var out := Vector3.FORWARD.rotated(Vector3.UP, yaw)
+	var side := Vector3.RIGHT.rotated(Vector3.UP, yaw)
+	if axe:
+		var a := add_pickup(Pickup.Kind.AXE, pos + out * 0.1 + side * 0.45 + Vector3.UP * 0.5)
+		a.rotation.y = yaw
+	add_pickup(Pickup.Kind.EXTINGUISHER, pos + out * 0.25 - side * 0.4)
+
+
 ## Where you are, for the HUD.
 ## World x-z bounds of the mapped structure, padded a little. Cached after first call.
 func map_bounds() -> Rect2:
@@ -1002,6 +1054,8 @@ func reset_props() -> void:
 		d.reset()
 	for d in doors:
 		d.reset()
+	for pn in panes:
+		pn.reset()
 	for sl in searchlights:
 		sl.visible = true
 	for d in drones:

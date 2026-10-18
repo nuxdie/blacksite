@@ -504,6 +504,7 @@ func _autotest() -> void:
 	r["fairness"] = await _fairness()
 	r["drones"] = await _drones()
 	r["multitool"] = await _multitool()
+	r["breach"] = await _breach()
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -605,6 +606,86 @@ func _multitool() -> Dictionary:
 
 ## Drones: scan from above, raise the alarm, grounded by comms-down, shot down, and no sight
 ## through walls or roofs.
+## Ways into the data office when its reader is dead: the axe on the door, or through a window.
+func _breach() -> Dictionary:
+	var c := {}
+	await _fresh("carbine")
+	_isolate([])
+	var p := game.player
+	var d := game.facility.doors[5]
+	c["door"] = d.label
+	# warehouse power off: the strike lock's reader dies
+	for dv in game.facility.devices:
+		if dv.kind == Device.Kind.BREAKER and dv.zone == "WAREHOUSE":
+			dv.on_used(game)
+			dv.on_used(game)
+	p.global_position = d.global_position + Vector3(0, 0, -1.0)
+	await _frames(3)
+	_look_at(d.global_position + Vector3.UP * 1.2)
+	await _frames(20)
+	c["reader_dead"] = not d.reader_live() and d.refused
+	c["no_axe_no_way"] = game.tool_action().is_empty()
+	p.has_axe = true
+	await _frames(3)
+	c["axe_offered"] = game.tool_action().get("kind") == "breach"
+	Input.action_press("interact")
+	await _frames(int(4.5 * 60.0) + 15)
+	Input.action_release("interact")
+	await _frames(90)
+	c["door_broken"] = d.broken and d.open_k > 0.9
+	# the west window: glass stops you, the axe clears it, then it's a climb through
+	await _fresh("carbine")
+	_isolate([])
+	var pane: Pane = null
+	for pn in game.facility.panes:
+		if absf(pn.global_position.x - 40.5) < 0.1 and pn.global_position.z > 25.0 and pn.global_position.z < 28.5:
+			pane = pn
+	c["pane_found"] = pane != null
+	p.global_position = Vector3(39.4, 4.2, 26.9)
+	p.yaw = -PI / 2
+	p.pitch = 0.0
+	await _frames(20)
+	c["glass_blocks"] = not p.vault_ok
+	p.has_axe = true
+	_look_at(pane.global_position)
+	await _frames(3)
+	c["smash_offered"] = game.tool_action().get("kind") == "smash"
+	Input.action_press("interact")
+	await _frames(int(0.7 * 60.0) + 15)
+	Input.action_release("interact")
+	c["glass_gone"] = pane.broken
+	p.pitch = 0.0
+	await _frames(20)
+	c["through_offered"] = p.vault_ok and p.vault_kind == "through"
+	_tap("jump")
+	await _frames(70)
+	c["inside"] = p.global_position.x > 40.7 and absf(p.global_position.y - 4.2) < 0.3
+	# an extinguisher shot open is a cloud on the spot
+	await _fresh("carbine")
+	_isolate([])
+	var ext: Pickup = null
+	for pk in game.facility.pickups:
+		if pk.kind == Pickup.Kind.EXTINGUISHER and ext == null:
+			ext = pk
+	p.global_position = ext.global_position + Vector3(2.5, 0, 0)
+	await _frames(3)
+	_look_at(ext.global_position + Vector3.UP * 0.25)
+	await _frames(3)
+	await _fire(6)
+	await _frames(40)
+	c["extinguisher_cloud"] = ext.taken and game.gadgets.any(func(g: Gadget) -> bool: return g.type == "extinguisher" and g.live)
+	# a frag against a door blows it open
+	await _fresh("carbine")
+	_isolate([])
+	var d2 := game.facility.doors[0]
+	p.global_position = d2.global_position + Vector3(0, 0, -12.0)
+	var g := game.spawn_gadget("frag", d2.global_position + Vector3(0, 0.3, -0.6), Vector3.ZERO, true)
+	g.fuse = 0.2
+	await _frames(60)
+	c["frag_breach"] = d2.broken
+	return c
+
+
 func _drones() -> Dictionary:
 	var c := {}
 	await _fresh("carbine")

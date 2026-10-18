@@ -10,6 +10,7 @@ const INFO := {
 	"flash": {"name": "FLASHBANG", "fuse": 1.6, "color": Color("8a9096"), "radius": 0.0},
 	"smoke": {"name": "SMOKE", "fuse": 1.5, "color": Color("4a5a64"), "radius": 4.5},
 	"decoy": {"name": "NOISEMAKER", "fuse": 1.0, "color": Color("b08030"), "radius": 0.0},
+	"extinguisher": {"name": "EXTINGUISHER", "fuse": 0.5, "color": Color("a81e1e"), "radius": 3.2},
 }
 
 var type := "frag"
@@ -56,6 +57,12 @@ static func create(p_type: String, from_player: bool) -> Gadget:
 		var bm := BoxMesh.new()
 		bm.size = Vector3(0.1, 0.06, 0.07)
 		mi.mesh = bm
+	elif p_type == "extinguisher":
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.075
+		cm.bottom_radius = 0.075
+		cm.height = 0.46
+		mi.mesh = cm
 	else:
 		var cm := CylinderMesh.new()
 		cm.top_radius = 0.045
@@ -83,17 +90,18 @@ func step(dt: float) -> bool:
 			if type == "frag" or type == "flash":
 				return false
 			live = true
-			life = 22.0 if type == "smoke" else 7.0
-			if type == "smoke":
+			life = 22.0 if type == "smoke" else (11.0 if type == "extinguisher" else 7.0)
+			if is_cloud():
 				_start_smoke()
 		return true
 	life -= dt
 	age += dt
 	tick -= dt
-	if type == "smoke":
-		cloud_radius = minf(4.8, 0.8 + age * 2.2) if life > 4.0 else 4.8 * life / 4.0
+	if is_cloud():
+		var rmax := 4.8 if type == "smoke" else 3.2
+		cloud_radius = minf(rmax, 0.8 + age * 2.2) if life > 4.0 else rmax * life / 4.0
 		var mat := fog.material as FogMaterial
-		mat.density = clampf(cloud_radius / 4.8, 0.0, 1.0) * 2.5
+		mat.density = clampf(cloud_radius / rmax, 0.0, 1.0) * 2.5
 		fog.size = Vector3.ONE * cloud_radius * 2.0 * Vector3(1.0, 0.6, 1.0)
 		fog.global_position = global_position + Vector3.UP * cloud_radius * 0.45
 		var pm := puffs.process_material as ParticleProcessMaterial
@@ -104,6 +112,11 @@ func step(dt: float) -> bool:
 			Sfx.play_at("hiss", global_position, -6.0)
 			tick = 2.0
 	return life > 0.0
+
+
+## Smoke grenades and extinguishers both fill a volume you can't see through.
+func is_cloud() -> bool:
+	return type == "smoke" or type == "extinguisher"
 
 
 func _start_smoke() -> void:
@@ -177,7 +190,7 @@ func _start_smoke() -> void:
 
 ## Where the smoke blocks sight (centre, radius); radius 0 when inactive.
 func smoke_sphere() -> Vector4:
-	if type != "smoke" or not live:
+	if not is_cloud() or not live:
 		return Vector4.ZERO
 	var c := global_position + Vector3.UP * cloud_radius * 0.45
 	return Vector4(c.x, c.y, c.z, cloud_radius)

@@ -7,3 +7,5 @@ const SOLDIERS := 4
 const GADGETS := 8
 ## Handrails: stop bodies from walking off catwalks, but bullets and eyes pass through.
 const RAILING := 16
+## Window glass: bodies and bullets meet it, eyes and lamps don't.
+const GLASS := 32

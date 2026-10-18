@@ -261,6 +261,15 @@ func resupply() -> void:
 	Sfx.play("mag_in", -2.0)
 
 
+## Something picked up that you throw: a slot for it if there isn't one, one more if there is.
+func add_gadget(type: String, n := 1) -> void:
+	for g in gadgets:
+		if g.type == type:
+			g.n = mini(3, int(g.n) + n)
+			return
+	gadgets.append({"type": type, "n": n})
+
+
 func gadget_info() -> Dictionary:
 	return gadgets[gsel] if gsel < gadgets.size() else {}
 

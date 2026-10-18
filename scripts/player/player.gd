@@ -87,6 +87,12 @@ var vault_to := Vector3.ZERO
 var vault_ok := false
 ## How long the vault or climb takes: short over a crate, longer hauling up a wall.
 var vault_dur := 0.38
+## The height the feet clear on the way: the ledge, or a window sill between here and there.
+var vault_peak := 0.0
+## "vault", "climb" or "through" (a window), for the prompt.
+var vault_kind := "vault"
+## The fire axe: breaks down dead doors and smashes glass. Picked up at a fire point.
+var has_axe := false
 ## After letting go of a ladder, a moment before it can grab you again.
 var ladder_cool := 0.0
 var trauma := 0.0
@@ -107,7 +113,7 @@ var _arc_ring: MeshInstance3D
 func _ready() -> void:
 	_shape = col.shape as CapsuleShape3D
 	collision_layer = Layers.PLAYER
-	collision_mask = Layers.WORLD | Layers.SOLDIERS | Layers.RAILING
+	collision_mask = Layers.WORLD | Layers.SOLDIERS | Layers.RAILING | Layers.GLASS
 	floor_snap_length = 0.35
 	floor_max_angle = deg_to_rad(46.0)
 	_build_arc()
@@ -189,8 +195,8 @@ func can_fire() -> bool:
 	return alive and active and not hacking and not in_tablet and not sprinting and bandage_t < 0.0 and ladder == null and drag_body == null and not weapons.aiming_throw and weapons.throw_t <= 0.0 and vault_t < 0.0
 
 
-func _ray(from: Vector3, to: Vector3) -> Dictionary:
-	var q := PhysicsRayQueryParameters3D.create(from, to, Layers.WORLD)
+func _ray(from: Vector3, to: Vector3, mask := Layers.WORLD) -> Dictionary:
+	var q := PhysicsRayQueryParameters3D.create(from, to, mask)
 	return get_world_3d().direct_space_state.intersect_ray(q)
 
 
@@ -451,30 +457,53 @@ func _update_sway(dt: float, w: WeaponData) -> void:
 	sway = Vector2((sin(sway_t * 0.9) * 1.3 + sin(sway_t * 2.3) * 0.3) * amp, sin(sway_t * 1.8) * 0.9 * amp)
 
 
-## Looks for vaultable ledges and low cover in front of the player.
+## Looks for ledges to vault or climb, windows to climb through, and low cover in front.
 func _probe_surroundings() -> void:
 	var fwd := forward()
 	var feet := global_position
 	vault_ok = false
 	low_cover_ahead = false
-	var hit := _ray(feet + Vector3.UP * 0.55, feet + Vector3.UP * 0.55 + fwd * 1.0)
-	if hit.is_empty():
-		# nothing at knee height: a taller wall or a ledge to climb?
-		hit = _ray(feet + Vector3.UP * 1.3, feet + Vector3.UP * 1.3 + fwd * 1.0)
+	if vault_t >= 0.0:
+		# mid-vault: the goal is set, don't retarget it off whatever passes the knees
+		return
+	var solid := Layers.WORLD | Layers.GLASS
+	var knee := _ray(feet + Vector3.UP * 0.55, feet + Vector3.UP * 0.55 + fwd * 1.0, solid)
+	var chest := _ray(feet + Vector3.UP * 1.3, feet + Vector3.UP * 1.3 + fwd * 1.2, solid)
+	var hit := knee if not knee.is_empty() else chest
 	var airborne := not is_on_floor()
 	if not hit.is_empty() and drag_body == null and not prone and (not airborne or velocity.y < 2.0):
+		# something to stand on just past the edge: a crate to vault, a wall to climb
 		var top_probe: Vector3 = hit.position + fwd * 0.3
 		top_probe.y = feet.y + 2.5
-		var down := _ray(top_probe, Vector3(top_probe.x, feet.y + 0.3, top_probe.z))
+		var down := _ray(top_probe, Vector3(top_probe.x, feet.y + 0.3, top_probe.z), solid)
 		if not down.is_empty():
 			var rise: float = down.position.y - feet.y
-			# from the ground: a crate to vault or a wall to climb; mid-jump: a ledge within arm's reach
 			if rise > 0.45 and rise < (1.5 if airborne else 2.3):
 				var top := Vector3(top_probe.x, down.position.y + 0.02, top_probe.z)
 				if _can_fit(H_CROUCH, top):
 					vault_ok = true
 					vault_to = top
+					vault_peak = top.y + 0.15
 					vault_dur = 0.38 if rise < 1.5 else 0.9
+					vault_kind = "vault" if rise < 1.5 else "climb"
+		# or a sill at waist height with nothing above it and a floor beyond: a window with no glass
+		var glass := _ray(feet + Vector3.UP * 1.3, feet + Vector3.UP * 1.3 + fwd * 1.5, Layers.GLASS)
+		if not vault_ok and not knee.is_empty() and chest.is_empty() and glass.is_empty() and not airborne:
+			var sp: Vector3 = knee.position + fwd * 0.08
+			var sill := _ray(Vector3(sp.x, feet.y + 1.5, sp.z), Vector3(sp.x, feet.y + 0.3, sp.z), solid)
+			if not sill.is_empty():
+				var sill_rise: float = sill.position.y - feet.y
+				if sill_rise > 0.5 and sill_rise < 1.4:
+					var beyond: Vector3 = knee.position + fwd * 0.9
+					var floor_hit := _ray(Vector3(beyond.x, sill.position.y + 0.3, beyond.z), Vector3(beyond.x, feet.y - 2.0, beyond.z), solid)
+					if not floor_hit.is_empty():
+						var land := Vector3(beyond.x, floor_hit.position.y + 0.02, beyond.z)
+						if _can_fit(H_CROUCH, land):
+							vault_ok = true
+							vault_to = land
+							vault_peak = sill.position.y + 0.15
+							vault_dur = 0.7
+							vault_kind = "through"
 	if crouched:
 		var d := view_dir()
 		d.y = 0.0
@@ -567,7 +596,7 @@ func _update_vault(dt: float) -> void:
 	var up := sin(minf(t * 1.6, 1.0) * PI * 0.5)
 	var fwd := smoothstep(0.25, 1.0, t)
 	var p := vault_from.lerp(vault_to, fwd)
-	p.y = lerpf(vault_from.y, vault_to.y + 0.15, up) - (0.15 * fwd)
+	p.y = lerpf(vault_from.y, vault_peak, up) - (vault_peak - vault_to.y) * fwd
 	global_position = p
 	if t >= 1.0:
 		vault_t = -1.0

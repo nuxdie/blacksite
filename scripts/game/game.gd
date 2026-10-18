@@ -89,6 +89,7 @@ var tool_target: Dictionary = {}
 ## What interact would do this tick, from focus().
 var act: Dictionary = {}
 var tool_progress := 0.0
+var _swing_t := 0.0
 var _spotted_t := -9.0
 var _trace_warn_t := 0.0
 
@@ -174,6 +175,9 @@ func start_mission() -> void:
 	gadgets.clear()
 	_pending_radio.clear()
 	facility.reset_props()
+	for pn in facility.panes:
+		pn.game = self
+	player.has_axe = false
 	fx.clear()
 	for r: Dictionary in ROSTER:
 		_spawn(r)
@@ -756,6 +760,13 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 				if t4 >= 0.0 and t4 < lt:
 					best = {"t": t4, "drone": dr}
 					lt = t4
+			for pk in facility.pickups:
+				if pk.taken or pk.kind != Pickup.Kind.EXTINGUISHER:
+					continue
+				var t5 := Ballistics.ray_sphere(oo, dd, pk.global_position + Vector3.UP * 0.25, 0.2)
+				if t5 >= 0.0 and t5 < lt:
+					best = {"t": t5, "extinguisher": pk}
+					lt = t5
 			return best,
 		func(pt: Vector3, n: Vector3, is_exit: bool, mat: String) -> void:
 			fx.hole(pt, n)
@@ -793,6 +804,9 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 	if tgt.has("drone"):
 		(tgt.drone as Drone).take_hit(w.damage)
 		fx.burst("spark", end)
+		return
+	if tgt.has("extinguisher"):
+		burst_extinguisher(tgt.extinguisher)
 		return
 	if tgt.has("camera"):
 		var cam: Device = tgt.camera
@@ -886,6 +900,14 @@ func soldier_shot(s: Soldier, target: Vector3, extra: float, suppressive: bool) 
 
 # ------------------------------------------------------------------ equipment
 
+## A punctured extinguisher empties itself on the spot: a small cloud, right now.
+func burst_extinguisher(pk: Pickup) -> void:
+	pk.take()
+	var g := spawn_gadget("extinguisher", pk.global_position + Vector3.UP * 0.3, Vector3(randf_range(-1, 1), 2.0, randf_range(-1, 1)), false)
+	g.fuse = 0.05
+	Sfx.play_at("impact_metal", pk.global_position, -4.0)
+
+
 func spawn_gadget(type: String, pos: Vector3, vel: Vector3, from_player: bool) -> Gadget:
 	var g := Gadget.create(type, from_player)
 	add_child(g)
@@ -963,6 +985,13 @@ func _on_detonate(g: Gadget) -> void:
 		"frag":
 			fx.hole(g.global_position + Vector3.UP * 0.05, Vector3.UP, 9.0, true)
 			blast(p, 7.5, 190.0, 150.0, g.owner_is_player)
+			for d in facility.doors:
+				if (d.global_position + Vector3.UP).distance_to(p) < 2.4:
+					d.breach()
+					hud.toast("%s  ·  BLOWN OPEN" % d.label)
+			for pn in facility.panes:
+				if pn.global_position.distance_to(p) < 6.0:
+					pn.shatter(true)
 		"flash":
 			Sfx.play_at("bang", p, 4.0, false)
 			fx.flash_light(p, Color.WHITE, 30.0, 0.3, 28.0)
@@ -1032,11 +1061,13 @@ func focus() -> Dictionary:
 	if tool.get("kind") == "clone":
 		var s: Soldier = tool.soldier
 		cands.append([_aim(s.global_position + Vector3.UP * (1.0 if s.alive else 0.3)), tool])
+	elif tool.get("kind") == "smash":
+		cands.append([_aim(tool.point), tool])
 	if not cands.is_empty():
 		cands.sort_custom(func(a: Array, b: Array) -> bool: return a[0] > b[0])
 		return cands[0][1]
 	# then the things that only need you to stand in the right place
-	if tool.get("kind") == "splice":
+	if tool.get("kind") in ["splice", "breach"]:
 		return tool
 	var c := corpse_near()
 	if c:
@@ -1130,7 +1161,7 @@ func _tick_devices(dt: float) -> void:
 		Sfx.loop_at("use", use_target.use_sound(), use_target.use_point(), -10.0, 1.5, 12.0)
 	else:
 		Sfx.stop_loop("use")
-	if act.get("kind") in ["clone", "splice"] and not _use_latch:
+	if act.get("kind") in ["clone", "splice", "breach", "smash"] and not _use_latch:
 		_tick_tool(dt, act)
 	else:
 		tool_target = {}
@@ -1552,7 +1583,34 @@ func tool_action() -> Dictionary:
 	var d2 := refused_door()
 	if d2 and d2.reader_live():
 		return {"kind": "splice", "door": d2, "time": 6.0 if d2.lock == Door.Lock.STRIKE else 9.0, "label": "Splice reader  ·  %s" % NetConsole._slug(d2.label)}
+	# the fire axe: a dead door comes off its track, a window stops being a window
+	if player.has_axe:
+		if d2 and not d2.broken:
+			return {"kind": "breach", "door": d2, "time": 4.5, "label": "Break the door down  ·  fire axe, loud"}
+		var pn := pane_near()
+		if not pn.is_empty():
+			return {"kind": "smash", "pane": pn.pane, "point": pn.point, "time": 0.7, "label": "Smash the glass  ·  fire axe"}
 	return {}
+
+
+## Unbroken glass in reach of a swing: {pane, point} with the nearest point on it, or {}.
+func pane_near() -> Dictionary:
+	var eye := player.eye_pos()
+	var d := player.view_dir()
+	var best := {}
+	var bd := 2.0
+	for pn in facility.panes:
+		if pn.broken:
+			continue
+		var local := pn.to_local(eye)
+		var h: Vector3 = pn.size * 0.5
+		var cp := pn.to_global(Vector3(clampf(local.x, -h.x, h.x), clampf(local.y, -h.y, h.y), clampf(local.z, -h.z, h.z)))
+		var to := cp - eye
+		var dist := to.length()
+		if dist < bd and dist > 0.05 and to.normalized().dot(d) > 0.6:
+			bd = dist
+			best = {"pane": pn, "point": cp}
+	return best
 
 
 ## Do our access levels already include all of these?
@@ -1569,13 +1627,30 @@ func _tick_tool(dt: float, a: Dictionary) -> void:
 		tool_progress = 0.0
 		Sfx.stop_loop("tool")
 		return
-	var at: Vector3 = (a.soldier.global_position + Vector3.UP) if a.kind == "clone" else (a.door.global_position + Vector3.UP * 1.2)
-	Sfx.loop_at("tool", "clone_loop" if a.kind == "clone" else "splice_loop", at, -10.0, 1.5, 12.0)
+	var at: Vector3
+	match a.kind:
+		"clone": at = a.soldier.global_position + Vector3.UP
+		"smash": at = a.point
+		_: at = a.door.global_position + Vector3.UP * 1.2
+	if a.kind in ["clone", "splice"]:
+		Sfx.loop_at("tool", "clone_loop" if a.kind == "clone" else "splice_loop", at, -10.0, 1.5, 12.0)
+	else:
+		Sfx.stop_loop("tool")
 	# same action continuing?
 	if tool_target.get("kind") != a.kind or tool_target.get("door") != a.get("door") or tool_target.get("soldier") != a.get("soldier"):
 		tool_target = a
 		tool_progress = 0.0
 	tool_progress += dt / float(a.time)
+	if a.kind in ["breach", "smash"]:
+		# axe work is swings, and every swing carries
+		_swing_t -= dt
+		if _swing_t <= 0.0:
+			_swing_t = 0.75
+			Sfx.play_at("impact_metal", at, 6.0)
+			fx.burst("spark" if a.kind == "breach" else "glass", at)
+			player.trauma = minf(1.0, player.trauma + 0.08)
+			player.viewmodel.recoil = 0.06
+			hear_gunshot(at, 30.0)
 	if tool_progress >= 1.0:
 		_finish_tool(a)
 		tool_target = {}
@@ -1592,6 +1667,15 @@ func _finish_tool(act: Dictionary) -> void:
 			hud.toast("BADGE CLONED  ·  " + "  ·  ".join(s.badge.map(func(a: String) -> String: return a.to_upper())), false)
 			Sfx.ui("badge_ok", -6.0)
 			hud.hint_event("badge")
+		"breach":
+			var d: Door = act.door
+			d.breach()
+			Sfx.play_at("door", d.global_position + Vector3.UP, 4.0)
+			fx.burst("spark", d.global_position + Vector3.UP * 1.2)
+			hud.toast("%s  ·  BREACHED" % d.label)
+			hear_gunshot(d.global_position + Vector3.UP, 45.0)
+		"smash":
+			(act.pane as Pane).shatter()
 		"splice":
 			var d: Door = act.door
 			d.unlocked = true
@@ -1688,6 +1772,13 @@ func _pick_up(p: Pickup) -> void:
 			hud.toast("RESUPPLIED", false)
 		Pickup.Kind.INTEL:
 			_take_intel()
+		Pickup.Kind.AXE:
+			player.has_axe = true
+			hud.toast("FIRE AXE", false)
+			hud.hint_event("axe")
+		Pickup.Kind.EXTINGUISHER:
+			player.weapons.add_gadget("extinguisher")
+			hud.toast("EXTINGUISHER  ·  THROW IT FOR COVER", false)
 		Pickup.Kind.WEAPON:
 			var old := player.weapons.swap_primary(p.weapon, p.mag_rounds, p.spares)
 			var drop := player.global_position + player.forward() * 0.4

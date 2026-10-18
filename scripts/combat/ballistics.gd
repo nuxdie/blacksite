@@ -27,7 +27,7 @@ static func trace(space: PhysicsDirectSpaceState3D, origin: Vector3, dir: Vector
 	var pens := 0
 	var exclude: Array[RID] = []
 	for _i in 4:
-		var q := PhysicsRayQueryParameters3D.create(org, org + dir * left, Layers.WORLD, exclude)
+		var q := PhysicsRayQueryParameters3D.create(org, org + dir * left, Layers.WORLD | Layers.GLASS, exclude)
 		var hit := space.intersect_ray(q)
 		var wall_t := left if hit.is_empty() else org.distance_to(hit.position)
 		var tgt: Dictionary = hit_fn.call(org, dir, wall_t)
@@ -38,6 +38,8 @@ static func trace(space: PhysicsDirectSpaceState3D, origin: Vector3, dir: Vector
 		var body: Object = hit.collider
 		var mat: String = body.get_meta("mat", "concrete") if body else "concrete"
 		wall_fn.call(hit.position, hit.normal, false, mat)
+		if body and body.has_method("on_shot"):
+			body.call("on_shot")
 		var res: float = body.get_meta("pen", 0.0) if body else 0.0
 		if res <= 0.0 or not body.has_meta("half"):
 			return {"mul": mul, "pens": pens, "end": hit.position, "wall": true}

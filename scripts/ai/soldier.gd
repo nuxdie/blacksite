@@ -130,7 +130,7 @@ func setup(p_profile: SoldierProfile, p_squad: Squad, pos: Vector3, p_yaw: float
 
 func _ready() -> void:
 	collision_layer = Layers.SOLDIERS
-	collision_mask = Layers.WORLD | Layers.PLAYER | Layers.SOLDIERS | Layers.RAILING
+	collision_mask = Layers.WORLD | Layers.PLAYER | Layers.SOLDIERS | Layers.RAILING | Layers.GLASS
 	floor_snap_length = 0.4
 	floor_max_angle = deg_to_rad(46.0)
 	model.build(profile)

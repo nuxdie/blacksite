@@ -55,12 +55,12 @@ static func capture(game: Game) -> Dictionary:
 	return {
 		"version": 1,
 		"time": game.time, "mission": game.mission, "detected": game.detected, "comms_down": game.comms_down,
-		"access": game.access.duplicate(), "doors": game.facility.doors.map(func(dr: Door) -> Array: return [dr.unlocked, dr.powered]), "trace": game.trace, "reinforce_t": game.reinforce_t, "stats": game.stats.duplicate(),
+		"access": game.access.duplicate(), "doors": game.facility.doors.map(func(dr: Door) -> Array: return [dr.unlocked, dr.powered, dr.broken]), "panes": game.facility.panes.map(func(pn: Pane) -> bool: return pn.broken), "trace": game.trace, "reinforce_t": game.reinforce_t, "stats": game.stats.duplicate(),
 		"repairs": repairs,
 		"hq": {"level": game.hq.level, "qrf": game.hq.qrf_called, "stats": game.hq.stats.duplicate(), "check_t": game.hq._check_t, "last_contact": game.hq.last_contact},
 		"player": {
 			"pos": p.global_position, "yaw": p.yaw, "pitch": p.pitch, "hp": p.hp, "bleed": p.bleed, "leg": p.leg_wound,
-			"bandages": p.bandages, "crouch": p.crouch_toggle,
+			"bandages": p.bandages, "crouch": p.crouch_toggle, "axe": p.has_axe,
 			"slots": w.slots.map(func(x: WeaponData) -> String: return x.id), "mag": w.mag.duplicate(), "spare": w.spare.duplicate(true),
 			"mode": w.mode.duplicate(), "cur": w.cur, "gadgets": w.gadgets.duplicate(true), "gsel": w.gsel,
 		},
@@ -83,6 +83,12 @@ static func restore(game: Game, d: Dictionary) -> void:
 	for i in mini(doors.size(), game.facility.doors.size()):
 		game.facility.doors[i].unlocked = doors[i][0]
 		game.facility.doors[i].powered = doors[i][1]
+		if doors[i].size() > 2 and doors[i][2]:
+			game.facility.doors[i].breach()
+	var panes: Array = d.get("panes", [])
+	for i in mini(panes.size(), game.facility.panes.size()):
+		if panes[i]:
+			game.facility.panes[i].shatter(true)
 	game.trace = d.trace
 	game.reinforce_t = d.reinforce_t
 	game.stats = d.stats
@@ -170,6 +176,7 @@ static func restore(game: Game, d: Dictionary) -> void:
 	p.bleed = ps.bleed
 	p.leg_wound = ps.leg
 	p.bandages = ps.bandages
+	p.has_axe = ps.get("axe", false)
 	p.crouch_toggle = ps.crouch
 	var slots: Array[WeaponData] = []
 	for id: String in ps.slots:

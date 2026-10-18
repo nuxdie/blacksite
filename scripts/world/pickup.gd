@@ -2,7 +2,7 @@ class_name Pickup
 extends Node3D
 ## Medkits, ammo crates, dropped weapons and loose rounds, grenades, and the objective drive.
 
-enum Kind { MEDKIT, AMMO, INTEL, ROUNDS, FRAG, WEAPON, BADGE }
+enum Kind { MEDKIT, AMMO, INTEL, ROUNDS, FRAG, WEAPON, BADGE, AXE, EXTINGUISHER }
 
 var kind: Kind
 var amount := 1
@@ -61,6 +61,8 @@ func label() -> String:
 		Kind.AMMO: return "Resupply"
 		Kind.INTEL: return "Take the drive"
 		Kind.WEAPON: return "Take %s  ·  %s" % [weapon.display_name, weapon.caliber]
+		Kind.AXE: return "Take the fire axe"
+		Kind.EXTINGUISHER: return "Take the extinguisher"
 	return ""
 
 
@@ -100,6 +102,24 @@ func _build() -> void:
 		Kind.BADGE:
 			_box(Vector3(0.09, 0.005, 0.055), Mats.plain(Color("e8edf1"), 0.4), Vector3(0, 0.01, 0), Vector3(0, randf() * TAU, 0))
 			_box(Vector3(0.03, 0.006, 0.02), Mats.emissive(Color("4ad0ff"), 2.0), Vector3(0, 0.012, 0))
+		Kind.AXE:
+			# hangs head-up on its clips
+			var wood := Mats.plain(Color("7a4a24"), 0.7)
+			_box(Vector3(0.035, 0.8, 0.035), wood, Vector3(0, 0.4, 0))
+			_box(Vector3(0.2, 0.13, 0.025), Mats.plain(Color("b02020"), 0.5, 0.3), Vector3(0.07, 0.72, 0))
+			_box(Vector3(0.06, 0.14, 0.012), Mats.plain(Color("c8ccd0"), 0.3, 0.9), Vector3(0.17, 0.72, 0))
+		Kind.EXTINGUISHER:
+			var mi := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.075
+			cm.bottom_radius = 0.075
+			cm.height = 0.46
+			mi.mesh = cm
+			mi.material_override = Mats.plain(Color("a81e1e"), 0.45, 0.3)
+			mi.position = Vector3(0, 0.23, 0)
+			add_child(mi)
+			_box(Vector3(0.05, 0.1, 0.05), dark, Vector3(0, 0.5, 0))
+			_box(Vector3(0.12, 0.02, 0.02), dark, Vector3(0.04, 0.55, 0))
 		Kind.FRAG:
 			var mi := MeshInstance3D.new()
 			var sm := SphereMesh.new()

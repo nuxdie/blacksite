@@ -31,6 +31,7 @@ window/stretch/aspect="expand"
 3d_physics/layer_3="soldiers"
 3d_physics/layer_4="gadgets"
 3d_physics/layer_5="railings"
+3d_physics/layer_6="glass"
 
 [physics]
 
