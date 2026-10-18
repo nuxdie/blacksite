@@ -226,8 +226,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("interact"):
 		if ladder:
 			ladder = null
-		elif game.takedown_target() == null and game.use_target == null and game.ladder_near():
-			grab_ladder(game.ladder_near())
 		else:
 			game.interact()
 	elif event.is_action_pressed("bandage"):

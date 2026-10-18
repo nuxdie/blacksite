@@ -342,8 +342,14 @@ func _autotest() -> void:
 	await _frames(60)
 	game.player.global_position = Vector3(-5, 0, -9.0)
 	await _frames(3)
+	# a rifle lying beside the body shares the key: look at the gun to take it, at the body to clone
+	var beside := game.facility.place(Pickup.dropped_weapon(Vector3(-5.7, 0, -10), load("res://resources/weapons/smg.tres"), 10, []))
+	_look_at(beside.global_position + Vector3.UP * 0.15)
+	await _frames(3)
+	hk["focus_gun"] = game.act.get("kind")
 	_look_at(Vector3(-5, 0.3, -10))
 	await _frames(3)
+	hk["focus_body"] = game.act.get("kind")
 	hk["clone_offered"] = game.tool_action().get("kind") == "clone"
 	Input.action_press("interact")
 	await _frames(int(2.2 * 60.0) + 10)

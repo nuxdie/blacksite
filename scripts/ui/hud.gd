@@ -897,31 +897,24 @@ func _prompts() -> Array:
 	if game.using and game.use_target:
 		out.append([["interact"], "Keep holding  ·  " + game.use_target.use_label(game)])
 		return out
-	if game.use_target and not game.takedown_target():
-		var u := game.use_target
-		var instant := u.use_time(game) <= 1.0
-		if u.can_use(game):
-			out.append([["interact"], u.use_label(game) + ("" if instant else "  ·  hold")])
-		else:
-			out.append([[], u.use_label(game)])
-	var t := game.takedown_target()
-	var tool := game.tool_action()
-	if t:
-		out.append([["interact"], "Takedown"])
-	elif not tool.is_empty():
-		out.append([["interact"], tool.label + "  ·  hold"])
-	else:
-		var it := game.interact_target()
-		if it:
-			out.append([["interact"], it.label()])
-		elif game.corpse_near():
-			out.append([["interact"], "Hold to drag body"])
-	if game.ladder_near() and not game.use_target and not game.takedown_target():
-		out.append([["interact"], "Climb ladder"])
+	# one key, one thing: whatever focus() picked
+	var a := game.act
+	match a.get("kind", ""):
+		"takedown", "pickup", "ladder":
+			out.append([["interact"], a.label])
+		"use":
+			if a.ok:
+				out.append([["interact"], a.label + ("  ·  hold" if a.hold else "")])
+			else:
+				out.append([[], a.label])
+		"clone", "splice":
+			out.append([["interact"], a.label + "  ·  hold"])
+		"drag":
+			out.append([["interact"], a.label])
 	if game.facility.in_duct(p.global_position + p.forward() * 0.9) and not p.crouched and not game.facility.in_duct(p.global_position):
 		out.append([["crouch"], "Crouch to crawl in"])
 	var dr := game.refused_door()
-	if dr and game.tool_action().get("kind") != "splice":
+	if dr and game.act.get("kind") != "splice":
 		if not dr.reader_live():
 			out.append([[], "%s  ·  reader dead, door stays locked" % dr.label])
 		else:

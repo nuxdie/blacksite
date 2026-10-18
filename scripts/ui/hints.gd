@@ -148,7 +148,7 @@ func _condition(trigger: String) -> bool:
 		"badge":
 			return _events.has("badge")
 		"tool_available":
-			return not game.tool_action().is_empty()
+			return game.act.get("kind") in ["clone", "splice"]
 		"drone_seen":
 			return game.facility.drones.any(func(d: Drone) -> bool: return d.scanning() and d.global_position.distance_to(game.player.global_position) < 24.0 and not game.player.camera.is_position_behind(d.global_position))
 		"drone_alarm", "camera_alarm":

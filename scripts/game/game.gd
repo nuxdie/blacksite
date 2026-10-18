@@ -86,6 +86,8 @@ var hq := Command.new(self)
 var console := NetConsole.new()
 ## Multitool action in progress: {kind, door|soldier, time, label}, and its 0..1 progress.
 var tool_target: Dictionary = {}
+## What interact would do this tick, from focus().
+var act: Dictionary = {}
 var tool_progress := 0.0
 var _spotted_t := -9.0
 var _trace_warn_t := 0.0
@@ -193,6 +195,7 @@ func start_mission() -> void:
 	console.close()
 	tool_target = {}
 	tool_progress = 0.0
+	act = {}
 	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
 	_spotted_t = -9.0
 	Sfx.set_muffle(0.0)
@@ -993,6 +996,56 @@ func _on_detonate(g: Gadget) -> void:
 
 # ------------------------------------------------------------------ networks, power, comms
 
+## The one thing interact does right now. Everything hangs off one key, so the prompt, the press
+## and the hold all read this instead of checking the targets separately and disagreeing.
+## Takedown first; then whichever aimed thing (pickup, device, badge clone) you look at most squarely;
+## then the proximity-only things (splice, ladder, drag body). Looking at something is how you choose.
+func focus() -> Dictionary:
+	if not player.alive or tablet_access:
+		return {}
+	if player.ladder:
+		return {"kind": "letgo", "label": "Let go"}
+	if player.drag_body:
+		return {"kind": "drop", "label": "Release to drop"}
+	var t := takedown_target()
+	if t:
+		return {"kind": "takedown", "soldier": t, "label": "Takedown"}
+	# aimed things compete on how squarely you're looking at them: a gun lying beside a body
+	# is the pickup when you look at the gun and the badge clone when you look at the body
+	var cands := []
+	var p := interact_target()
+	if p:
+		cands.append([_aim(p.global_position + Vector3.UP * 0.15), {"kind": "pickup", "pickup": p, "label": p.label()}])
+	# a device you can't work yet still names itself, but only if nothing else wants the key
+	var dev := {}
+	if use_target:
+		dev = {"kind": "use", "device": use_target, "ok": use_target.can_use(self), "hold": use_target.use_time(self) > 1.0, "label": use_target.use_label(self)}
+		if dev.ok:
+			cands.append([_aim(use_target.use_point()), dev])
+	var tool := tool_action()
+	if tool.get("kind") == "clone":
+		var s: Soldier = tool.soldier
+		cands.append([_aim(s.global_position + Vector3.UP * (1.0 if s.alive else 0.3)), tool])
+	if not cands.is_empty():
+		cands.sort_custom(func(a: Array, b: Array) -> bool: return a[0] > b[0])
+		return cands[0][1]
+	# then the things that only need you to stand in the right place
+	if tool.get("kind") == "splice":
+		return tool
+	var l := ladder_near()
+	if l:
+		return {"kind": "ladder", "ladder": l, "label": "Climb ladder"}
+	var c := corpse_near()
+	if c:
+		return {"kind": "drag", "soldier": c, "label": "Hold to drag body"}
+	return dev
+
+
+## How squarely the player is looking at a point: 1 dead on, 0 at ninety degrees.
+func _aim(point: Vector3) -> float:
+	return (point - player.eye_pos()).normalized().dot(player.view_dir())
+
+
 ## The physical device in reach that interact would use, or null.
 func find_use_target() -> Device:
 	if not player.alive or player.drag_body or player.vault_t >= 0.0 or tablet_access:
@@ -1048,10 +1101,11 @@ func _tick_devices(dt: float) -> void:
 	facility.tick_searchlights(dt)
 	trace = maxf(0.0, trace - dt * (0.4 if tablet_access else 1.5))
 	use_target = find_use_target()
+	act = focus()
 	using = false
 	if not Input.is_action_pressed("interact"):
 		_use_latch = false
-	if use_target and player.active and use_target.can_use(self) and takedown_target() == null:
+	if act.get("kind") == "use" and act.ok and player.active:
 		if Input.is_action_pressed("interact") and not _use_latch:
 			using = true
 			var prog: float = use_progress.get(use_target, 0.0) + dt / use_target.use_time(self)
@@ -1067,8 +1121,8 @@ func _tick_devices(dt: float) -> void:
 		Sfx.loop_at("use", use_target.use_sound(), use_target.use_point(), -10.0, 1.5, 12.0)
 	else:
 		Sfx.stop_loop("use")
-	if not using:
-		_tick_tool(dt)
+	if act.get("kind") in ["clone", "splice"] and not _use_latch:
+		_tick_tool(dt, act)
 	else:
 		tool_target = {}
 		tool_progress = 0.0
@@ -1443,11 +1497,9 @@ func _dispatch(pos: Vector3, how: String, count := 3) -> void:
 
 
 ## What the multitool can do where you're looking: clone a badge off an unaware guard or a body,
-## or splice a secured door's reader open. Nothing if a takedown, device or pickup is in reach.
+## or splice a secured door's reader open. Ordered against the other uses of the key in focus().
 func tool_action() -> Dictionary:
 	if not player.alive or player.in_tablet or player.drag_body or player.ladder:
-		return {}
-	if takedown_target() or (use_target and use_target.can_use(self)):
 		return {}
 	var eye := player.eye_pos()
 	var fwd := player.view_dir()
@@ -1485,24 +1537,24 @@ func access_covers(levels: Array) -> bool:
 	return true
 
 
-func _tick_tool(dt: float) -> void:
-	var act := tool_action()
-	if act.is_empty() or not Input.is_action_pressed("interact"):
+func _tick_tool(dt: float, a: Dictionary) -> void:
+	if not Input.is_action_pressed("interact"):
 		tool_target = {}
 		tool_progress = 0.0
 		Sfx.stop_loop("tool")
 		return
-	var at: Vector3 = (act.soldier.global_position + Vector3.UP) if act.kind == "clone" else (act.door.global_position + Vector3.UP * 1.2)
-	Sfx.loop_at("tool", "clone_loop" if act.kind == "clone" else "splice_loop", at, -10.0, 1.5, 12.0)
+	var at: Vector3 = (a.soldier.global_position + Vector3.UP) if a.kind == "clone" else (a.door.global_position + Vector3.UP * 1.2)
+	Sfx.loop_at("tool", "clone_loop" if a.kind == "clone" else "splice_loop", at, -10.0, 1.5, 12.0)
 	# same action continuing?
-	if tool_target.get("kind") != act.kind or tool_target.get("door") != act.get("door") or tool_target.get("soldier") != act.get("soldier"):
-		tool_target = act
+	if tool_target.get("kind") != a.kind or tool_target.get("door") != a.get("door") or tool_target.get("soldier") != a.get("soldier"):
+		tool_target = a
 		tool_progress = 0.0
-	tool_progress += dt / float(act.time)
+	tool_progress += dt / float(a.time)
 	if tool_progress >= 1.0:
-		_finish_tool(act)
+		_finish_tool(a)
 		tool_target = {}
 		tool_progress = 0.0
+		_use_latch = true
 
 
 func _finish_tool(act: Dictionary) -> void:
@@ -1576,28 +1628,30 @@ func interact_target() -> Pickup:
 
 
 func interact() -> void:
-	if not player.alive:
-		return
-	var t := takedown_target()
-	if t:
-		Sfx.play_at("takedown", t.global_position + Vector3.UP, 0.0, false)
-		player.trauma += 0.15
-		player.viewmodel.recoil = 0.08
-		player.viewmodel.recoil_rot = -0.3
-		t.die(player.view_dir(), false, true)
-		for o in soldiers:
-			if o.alive and o.global_position.distance_to(t.global_position) < 15.0 and o.sees:
-				o.alert(player.global_position, "saw")
-		hud.learn("takedown")
-		return
-	if use_target:
-		return
-	var p := interact_target()
-	if p == null:
-		var c := corpse_near()
-		if c:
-			player.start_drag(c)
-		return
+	var a := focus()
+	match a.get("kind", ""):
+		"takedown":
+			var t: Soldier = a.soldier
+			Sfx.play_at("takedown", t.global_position + Vector3.UP, 0.0, false)
+			player.trauma += 0.15
+			player.viewmodel.recoil = 0.08
+			player.viewmodel.recoil_rot = -0.3
+			t.die(player.view_dir(), false, true)
+			for o in soldiers:
+				if o.alive and o.global_position.distance_to(t.global_position) < 15.0 and o.sees:
+					o.alert(player.global_position, "saw")
+			hud.learn("takedown")
+			_use_latch = true
+		"pickup":
+			_pick_up(a.pickup)
+			_use_latch = true
+		"ladder":
+			player.grab_ladder(a.ladder)
+		"drag":
+			player.start_drag(a.soldier)
+
+
+func _pick_up(p: Pickup) -> void:
 	match p.kind:
 		Pickup.Kind.MEDKIT:
 			if not player.needs_treatment():
