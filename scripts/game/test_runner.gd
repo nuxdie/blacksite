@@ -394,6 +394,23 @@ func _autotest() -> void:
 	hk["trace_with_badge"] = roundi(game.trace)
 	await _console("blackout")
 	hk["all_cameras_down"] = cams.all(func(d: Device) -> bool: return d.disabled or d.destroyed)
+	# a drone on the line: ride its camera, send it home
+	await _console("nmap uav-01")
+	await _console("cam uav-01")
+	hk["uav_feed"] = game.console.feed_source() == game.facility.drones[0]
+	await _console("uav uav-01 ground")
+	hk["uav_recalled"] = game.facility.drones[0].recall_t > 0.0 and game.facility.drones[0].mode == Drone.Mode.RETURN
+	game.close_tablet()
+	# back on a box we already got into: the cached session skips the login
+	await _frames(10)
+	_look_at(term.use_point())
+	await _frames(3)
+	Input.action_press("interact")
+	await _frames(int(1.6 * 60.0) + 10)
+	Input.action_release("interact")
+	hk["resume_mode"] = game.console.mode
+	await _frames(60)
+	hk["resumed_admin"] = game.console.phase == NetConsole.Phase.SHELL and game.tablet_admin
 	game.close_tablet()
 	# relay sabotage cuts their radio
 	await _fresh("carbine")
@@ -425,8 +442,15 @@ func _autotest() -> void:
 	await _frames(5)
 	_look_at(yard_breaker.use_point())
 	await _frames(3)
+	# screws out first, then the cutters on the feed
 	Input.action_press("interact")
-	await _frames(80)
+	await _frames(int(5.0 * 60.0) + 15)
+	Input.action_release("interact")
+	await _frames(10)
+	hk["breaker_cover_open"] = yard_breaker.cover_open and not yard_breaker.sabotaged
+	hk["breaker_cut_prompt"] = yard_breaker.use_label(game)
+	Input.action_press("interact")
+	await _frames(int(2.5 * 60.0) + 15)
 	Input.action_release("interact")
 	hk["yard_dark"] = game.facility.lamps.filter(func(l: Lamp) -> bool: return l.zone == "YARD").all(func(l: Lamp) -> bool: return not l.is_lit())
 	hk["warehouse_lit"] = game.facility.lamps.filter(func(l: Lamp) -> bool: return l.zone == "WAREHOUSE").any(func(l: Lamp) -> bool: return l.is_lit())
@@ -569,7 +593,8 @@ func _multitool() -> Dictionary:
 	d = game.facility.doors[1]
 	for dv in game.facility.devices:
 		if dv.kind == Device.Kind.BREAKER and dv.zone == "OFFICE":
-			dv.on_used(game)
+			dv.on_used(game)  # cover off
+			dv.on_used(game)  # wires cut
 	p.global_position = d.global_position + Vector3(0, 0, -0.9)
 	await _frames(3)
 	_look_at(d.global_position + Vector3.UP * 1.2)

@@ -28,6 +28,8 @@ var hp := 18.0
 var landed := false
 var _vy := 0.0
 var _dive_t := 0.0
+## Sent home from the deck: it sits at base until this runs out.
+var recall_t := 0.0
 
 var _i := 0
 var _wait := 0.0
@@ -148,6 +150,7 @@ func reset() -> void:
 	landed = false
 	_vy = 0.0
 	_dive_t = 0.0
+	recall_t = 0.0
 	if _hum and _hum.stream and not _hum.playing:
 		_hum.play()
 
@@ -162,6 +165,25 @@ func scanning() -> bool:
 
 func grounded() -> bool:
 	return destroyed or down_t > 0.0
+
+
+## Ordered home over the network, for a while.
+func recall(seconds: float) -> void:
+	recall_t = maxf(recall_t, seconds)
+	if not grounded() and mode != Mode.DIVE:
+		mode = Mode.RETURN
+		aware = 0.0
+
+
+## Whether its camera shows a picture on the deck.
+func feed_live() -> bool:
+	return not destroyed and down_t <= 0.0
+
+
+## Its camera: under the body, looking down and ahead the way it's flying.
+func feed_transform() -> Transform3D:
+	var b := Basis.from_euler(Vector3(-deg_to_rad(62.0), _yaw, 0.0))
+	return Transform3D(b, head_pos())
 
 
 # ------------------------------------------------------------------ hit
@@ -269,7 +291,8 @@ func tick(dt: float, game_ref: Game) -> void:
 			mode = Mode.RETURN
 			position.y = home.y
 		return
-	if game.comms_down and mode != Mode.RETURN and mode != Mode.DIVE:
+	recall_t = maxf(0.0, recall_t - dt)
+	if (game.comms_down or recall_t > 0.0) and mode != Mode.RETURN and mode != Mode.DIVE:
 		mode = Mode.RETURN
 	if mode == Mode.DIVE:
 		_dive(dt)
@@ -389,7 +412,7 @@ func _track(dt: float) -> void:
 
 func _return(dt: float) -> void:
 	if _move_toward(home, dt):
-		if not game.comms_down:
+		if not game.comms_down and recall_t <= 0.0:
 			mode = Mode.PATROL
 			_target = route[_i]
 

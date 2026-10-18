@@ -1216,7 +1216,7 @@ func open_tablet(access: Device) -> void:
 	tablet_cam = 0
 	player.in_tablet = true
 	console.game = self
-	var mode := "badge" if has_badge else ("creds" if access.creds_known else "brute")
+	var mode := "saved" if access.cracked else ("badge" if has_badge else ("creds" if access.creds_known else "brute"))
 	console.open(access, mode)
 	access.plug(true, player.chest_pos())
 	Sfx.ui("ui_select", -8.0)
@@ -1225,6 +1225,10 @@ func open_tablet(access: Device) -> void:
 ## The login got through: the shell is open.
 func session_opened() -> void:
 	tablet_admin = console.admin
+	if tablet_access:
+		# the nettop keeps the key: next time it's straight in
+		tablet_access.cracked = true
+		tablet_access.cracked_admin = tablet_access.cracked_admin or console.admin
 	stats.hacks += 1
 	Sfx.stop_loop("brute")
 	Sfx.ui("term_login", -6.0)

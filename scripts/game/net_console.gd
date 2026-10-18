@@ -33,6 +33,8 @@ var log: Array[Dictionary] = []
 var history: Array[String] = []
 var hist_i := 0
 var watch_cam := 0
+## Riding a drone's camera instead of a fixed one.
+var watch_drone: Drone = null
 ## Transient highlight of a device just acted on, for the feed/overlay.
 var flash := ""
 ## True once nmap has listed the props this session.
@@ -76,6 +78,9 @@ func open(p_node: Device, p_mode: String) -> void:
 	_out("nettop: link up on %s  ·  1000M full  ·  %s" % [_slug(node.label), SUBNET], "dim")
 	_out("probe: ssh on %s  ·  open  ·  banner \"secnet-%s\"" % [_host_ip(), _slug(node.label)], "dim")
 	match mode:
+		"saved":
+			login_dur = 0.7
+			_out("auth: cached session key for %s …" % _host_ip(), "amber")
 		"badge":
 			login_dur = 1.8
 			_out("auth: presenting security badge over the link …", "amber")
@@ -96,6 +101,15 @@ func close() -> void:
 	connected = false
 	phase = Phase.SHELL
 	node = null
+	watch_drone = null
+
+
+## What the feed window shows: a drone you're riding, or the chosen fixed camera.
+func feed_source() -> Node3D:
+	if watch_drone and not watch_drone.destroyed:
+		return watch_drone
+	var cams := game.cameras()
+	return cams[clampi(watch_cam, 0, cams.size() - 1)]
 
 
 ## The login runs itself; lines appear as attempts go by, and the shell opens on the hit.
@@ -125,6 +139,9 @@ func finish_login() -> void:
 		return
 	phase = Phase.SHELL
 	match mode:
+		"saved":
+			admin = node.cracked_admin
+			_out("session resumed: %s  ·  no login, nothing logged" % ("admin" if admin else "user"), "green")
 		"badge":
 			admin = true
 			_out("auth: badge accepted  ·  session: admin", "green")
@@ -244,7 +261,8 @@ func _run(line: String) -> void:
 		"door", "unlock", "lock": _cmd_door(verb, args)
 		"power", "breaker": _cmd_power(args)
 		"relay", "jam": _cmd_relay(args)
-		"drones", "drone": _cmd_drones(args)
+		"drones": _cmd_drones(args)
+		"uav", "drone": _cmd_uav(args)
 		"clear", "cls": log.clear()
 		"logout", "exit", "quit", "disconnect": game.close_tablet()
 		_: _out("%s: command not found   (try `help`)" % verb, "red")
@@ -288,6 +306,11 @@ func hosts() -> Array[Dictionary]:
 	if lap:
 		out.append({"ip": "10.13.37.50", "host": "ws-intel", "short": "host", "desc": "data workstation",
 			"type": "laptop", "dev": lap})
+	i = 41
+	for dr in game.facility.drones:
+		out.append({"ip": "10.13.37.%d" % i, "host": "uav-%02d" % (i - 40), "short": "uav", "desc": "patrol drone",
+			"type": "drone", "drone": dr})
+		i += 1
 	return out
 
 
@@ -349,14 +372,23 @@ func _host_state(h: Dictionary) -> String:
 		"laptop":
 			var l: Device = h.dev
 			return {"idle": "idle", "copying": "copying %d%%" % roundi(l.copy_progress * 100.0), "done": "staged", "taken": "pulled"}.get(l.copy_state, "idle")
+		"drone":
+			var dr: Drone = h.drone
+			if dr.destroyed: return "wrecked"
+			if dr.down_t > 0.0: return "rebooting"
+			if dr.mode == Drone.Mode.DIVE: return "ATTACK RUN"
+			if dr.mode == Drone.Mode.TRACK: return "TRACKING"
+			if dr.recall_t > 0.0: return "recalled %ds" % ceili(dr.recall_t)
+			if dr.mode == Drone.Mode.RETURN: return "returning"
+			return "patrol"
 	return ""
 
 
 func _state_tag(h: Dictionary) -> String:
 	var s := _host_state(h)
-	if s in ["ALARM", "jammed"]:
+	if s in ["ALARM", "jammed", "ATTACK RUN", "TRACKING"]:
 		return "red"
-	if s in ["live", "up", "on"]:
+	if s in ["live", "up", "on", "patrol"]:
 		return "green"
 	return "dim"
 
@@ -368,6 +400,7 @@ func _host_hint(h: Dictionary) -> String:
 		"breaker": return "power %s off  (admin)" % h.zone
 		"relay": return "relay down to jam the radio"
 		"laptop": return "copy the drive at the machine itself"
+		"drone": return "cam %s to ride its camera, uav %s ground to send it home" % [h.host, h.host]
 	return ""
 
 
@@ -385,12 +418,53 @@ func _cam(args: Array) -> int:
 
 
 func _cmd_watch(args: Array) -> void:
+	var dr := _uav(args)
+	if dr:
+		if not dr.feed_live():
+			_out("%s: no picture" % _uav_name(dr), "red"); return
+		watch_drone = dr
+		_out("feed: %s  ·  live from the air" % _uav_name(dr), "green")
+		return
 	var i := _cam(args)
 	if i < 0 or i >= game.cameras().size():
-		_out("usage: cam <camera>", "red"); return
+		_out("usage: cam <camera|uav>", "red"); return
+	watch_drone = null
 	watch_cam = i
 	game.tablet_cam = i
 	_out("feed: %s" % _slug(game.cameras()[i].label), "green")
+
+
+# ------------------------------------------------------------------ drones
+
+func _uav_name(dr: Drone) -> String:
+	return "uav-%02d" % (game.facility.drones.find(dr) + 1)
+
+
+func _uav(args: Array) -> Drone:
+	if args.is_empty():
+		return null
+	for dr in game.facility.drones:
+		if _uav_name(dr).begins_with(args[0]) or ("uav" + args[0]) == _uav_name(dr).replace("-", ""):
+			return dr
+	return null
+
+
+## One drone at a time: send it home for a while, or let it go back to work.
+func _cmd_uav(args: Array) -> void:
+	var dr := _uav(args)
+	if dr == null or args.size() < 2 or not (args[1] in ["ground", "release"]):
+		_out("usage: uav <id> ground|release", "red"); return
+	if dr.destroyed:
+		_out("%s: wrecked" % _uav_name(dr), "dim"); return
+	if args[1] == "ground":
+		if dr.mode == Drone.Mode.DIVE:
+			_out("%s: not answering" % _uav_name(dr), "red"); return
+		dr.recall(90.0)
+		game.add_trace(12.0, "Drone recalled")
+		_out("%s: return-to-base sent  ·  holds at the pad 90 s" % _uav_name(dr), "amber")
+	else:
+		dr.recall_t = 0.0
+		_out("%s: released to patrol" % _uav_name(dr), "green")
 
 
 func _cmd_loop(args: Array) -> void:
@@ -535,7 +609,7 @@ func _cmd_drones(args: Array) -> void:
 func _catalog() -> Array[Dictionary]:
 	return [
 		{"usage": "nmap [name]", "verb": "nmap", "help": "list the props, or look at one", "admin": false},
-		{"usage": "cam <cam>", "verb": "cam", "help": "watch a camera feed", "admin": false},
+		{"usage": "cam <cam|uav>", "verb": "cam", "help": "watch a camera, or ride a drone's", "admin": false},
 		{"usage": "loop <cam>", "verb": "loop", "help": "hold a feed on a loop (+12)", "admin": false},
 		{"usage": "kill <cam>", "verb": "kill", "help": "drop a camera (+25)", "admin": false},
 		{"usage": "restore <cam>", "verb": "restore", "help": "bring a camera back", "admin": false},
@@ -543,7 +617,8 @@ func _catalog() -> Array[Dictionary]:
 		{"usage": "relay down", "verb": "relay", "help": "jam the guard radio (+20)", "admin": false},
 		{"usage": "power <zone> off", "verb": "power", "help": "cut a zone's power (+10)", "admin": true},
 		{"usage": "blackout", "verb": "blackout", "help": "all cameras off (+40)", "admin": true},
-		{"usage": "drones ground", "verb": "drones", "help": "recall the drones (+15)", "admin": true},
+		{"usage": "uav <id> ground", "verb": "uav", "help": "send one drone home for 90 s (+12)", "admin": false},
+		{"usage": "drones ground", "verb": "drones", "help": "recall the whole fleet (+15)", "admin": true},
 		{"usage": "help", "verb": "help", "help": "this list", "admin": false},
 		{"usage": "exit", "verb": "logout", "help": "unplug and pack up", "admin": false},
 	]
@@ -561,7 +636,12 @@ func _targets(verb: String) -> Array:
 	match verb:
 		"nmap", "scan":
 			return hosts().map(func(h: Dictionary) -> String: return h.host)
-		"cam", "watch", "loop", "replay", "kill", "disable", "restore":
+		"cam", "watch":
+			var names: Array = game.cameras().map(func(c: Device) -> String: return _slug(c.label))
+			for dr in game.facility.drones:
+				names.append(_uav_name(dr))
+			return names
+		"loop", "replay", "kill", "disable", "restore":
 			return game.cameras().map(func(c: Device) -> String: return _slug(c.label))
 		"door", "unlock", "lock":
 			return game.facility.doors.map(func(d: Door) -> String: return _slug(d.label))
@@ -572,8 +652,10 @@ func _targets(verb: String) -> Array:
 			return z.keys()
 		"relay", "jam":
 			return ["down", "up"]
-		"drones", "drone":
+		"drones":
 			return ["ground"]
+		"uav", "drone":
+			return game.facility.drones.map(func(dr: Drone) -> String: return _uav_name(dr))
 	return []
 
 

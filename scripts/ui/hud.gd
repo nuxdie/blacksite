@@ -208,10 +208,9 @@ func refresh(dt: float) -> void:
 	_feed_rect.visible = open
 	_feed_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if open else SubViewport.UPDATE_DISABLED
 	if open:
-		var ci: int = clampi(game.console.watch_cam, 0, game.cameras().size() - 1)
-		var cam := game.cameras()[ci]
-		_feed_cam.global_transform = cam.feed_transform()
-		var sig := 0.0 if cam.destroyed or cam.disabled else 1.0
+		var src := game.console.feed_source()
+		_feed_cam.global_transform = src.feed_transform()
+		var sig := 1.0 if src.feed_live() else 0.0
 		(_feed_rect.material as ShaderMaterial).set_shader_parameter("signal", sig)
 	_fx_mat.set_shader_parameter("suppression", p.supp)
 	_fx_mat.set_shader_parameter("damage", _damage)
@@ -1050,9 +1049,8 @@ func _draw_tablet(size: Vector2) -> void:
 	_feed_rect.position = feed.position
 	_feed_rect.size = feed.size
 	_overlay.draw_rect(feed, Color(1, 1, 1, 0.15), false, 1.0)
-	var ci: int = clampi(con.watch_cam, 0, cams.size() - 1)
 	var secs := int(game.time) + 7_380
-	_text(feed.position + Vector2(8, 16), "%s  02:%02d:%02d" % [cams[ci].label, (secs / 60) % 60, secs % 60], 12, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_LEFT, mono)
+	_text(feed.position + Vector2(8, 16), "%s  02:%02d:%02d" % [con.feed_source().label, (secs / 60) % 60, secs % 60], 12, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_LEFT, mono)
 	if fmod(game.time, 1.0) < 0.5:
 		_overlay.draw_circle(feed.position + Vector2(feed.size.x - 14, 13), 4.0, RED)
 	var ty := feed.end.y + 22.0

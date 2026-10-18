@@ -34,6 +34,11 @@ var locked := 0.0
 var capped := false
 var cover_open := false
 var creds_known := false
+## A session was opened on this port once; the nettop keeps the key and walks straight back in.
+var cracked := false
+var cracked_admin := false
+## Breaker: the live wires behind the cover, and the gap where you cut them.
+var _wires: Array[MeshInstance3D] = []
 ## The login the brute-force ends up finding ("user:password"); printed on the cover when capped.
 var password := "admin:admin"
 var plugged := false
@@ -124,7 +129,13 @@ func reset() -> void:
 		plug(false)
 		_set_cover(false)
 		creds_known = false
+		cracked = false
+		cracked_admin = false
 		_read_t = 0.0
+	if kind == Kind.BREAKER:
+		_set_cover(false)
+		for w in _wires:
+			w.visible = true
 	if _cone:
 		_cone.visible = true
 	if _lens_mat:
@@ -141,7 +152,8 @@ func reset() -> void:
 
 func save_state() -> Dictionary:
 	return {"looped": looped, "disabled": disabled, "destroyed": destroyed, "locked": locked, "sabotaged": sabotaged,
-		"copy_state": copy_state, "copy_progress": copy_progress, "yaw": _yaw, "cover_open": cover_open, "creds_known": creds_known}
+		"copy_state": copy_state, "copy_progress": copy_progress, "yaw": _yaw, "cover_open": cover_open, "creds_known": creds_known,
+		"cracked": cracked, "cracked_admin": cracked_admin}
 
 
 func load_state(d: Dictionary) -> void:
@@ -156,6 +168,9 @@ func load_state(d: Dictionary) -> void:
 	_yaw = d.yaw
 	if kind == Kind.ACCESS:
 		creds_known = d.get("creds_known", false)
+		cracked = d.get("cracked", false)
+		cracked_admin = d.get("cracked_admin", false)
+	if kind == Kind.ACCESS or kind == Kind.BREAKER:
 		if d.get("cover_open", false):
 			_set_cover(true)
 			_cover_t = 1.0
@@ -165,6 +180,8 @@ func load_state(d: Dictionary) -> void:
 		head.visible = false
 	if kind == Kind.BREAKER and sabotaged:
 		_led_mat.emission = Color("ff4a3a")
+		for w in _wires:
+			w.visible = false
 	if kind == Kind.VENT:
 		_set_grille(not sabotaged)
 	if _drive:
@@ -253,10 +270,11 @@ func _build_access() -> void:
 	_build_nettop()
 
 
-## The cover plate: four screws on the outside, the installer's label on the inside.
-func _build_cover() -> void:
+## The cover plate: four screws on the outside, a label on the inside. `front` is how far the
+## box's face sits from its centre; `text` is what's written inside (the login, for a port).
+func _build_cover(front := 0.1, text := "") -> void:
 	_cover = Node3D.new()
-	_cover.position = Vector3(0, -0.3, -0.1)
+	_cover.position = Vector3(0, -0.3, -front)
 	add_child(_cover)
 	var plate := Mats.plain(Color("63676b"), 0.5, 0.5)
 	_box(_cover, Vector3(0.5, 0.6, 0.02), plate, Vector3(0, 0.3, -0.01))
@@ -284,7 +302,7 @@ func _build_cover() -> void:
 	_box(_sticker, Vector3(0.3, 0.1, 0.004), Mats.emissive(Color("d8d4c4"), 0.25), Vector3.ZERO)
 	var parts := password.split(":")
 	var txt := Label3D.new()
-	txt.text = "DEFAULT LOGIN\nuser %s   pass %s" % [parts[0], parts[1] if parts.size() > 1 else ""]
+	txt.text = text if text != "" else "DEFAULT LOGIN\nuser %s   pass %s" % [parts[0], parts[1] if parts.size() > 1 else ""]
 	txt.font = Style.semibold
 	txt.font_size = 44
 	txt.pixel_size = 0.0006
@@ -383,11 +401,30 @@ func _build_relay() -> void:
 	_box(self, Vector3(0.06, 0.06, 0.06), _led_mat, Vector3(0.3, 3.32, 0))
 
 
+## A breaker panel: a screwed-on cover, and behind it the switches and the feed wires.
+## Cutting the zone's power is done with cutters on those wires.
 func _build_breaker() -> void:
-	_box(self, Vector3(0.45, 0.6, 0.12), Mats.plain(Color("8a9096"), 0.5, 0.6), Vector3.ZERO)
-	_box(self, Vector3(0.3, 0.08, 0.01), Mats.plain(Color("c8a640"), 0.7), Vector3(0, 0.2, -0.065))
+	capped = true
+	_box(self, Vector3(0.5, 0.6, 0.14), Mats.plain(Color("8a9096"), 0.5, 0.6), Vector3.ZERO)
+	_box(self, Vector3(0.44, 0.54, 0.01), Mats.plain(Color("26282b"), 0.6, 0.3), Vector3(0, 0, -0.068))
 	_led_mat = Mats.emissive(Color("40ff90"), 1.4)
-	_box(self, Vector3(0.03, 0.03, 0.01), _led_mat, Vector3(0.15, -0.2, -0.065))
+	_box(self, Vector3(0.03, 0.03, 0.01), _led_mat, Vector3(0.17, 0.22, -0.076))
+	# a row of breaker switches
+	for i in 6:
+		_box(self, Vector3(0.04, 0.09, 0.02), Mats.plain(Color("0e0f11"), 0.5), Vector3(-0.15 + i * 0.06, 0.1, -0.078))
+		_box(self, Vector3(0.02, 0.03, 0.012), Mats.plain(Color("d8d8d8"), 0.5), Vector3(-0.15 + i * 0.06, 0.12, -0.088))
+	# the feed: three wires down to the terminals; the middle piece goes when they're cut
+	var cols := [Color("8a2a20"), Color("1c1d22"), Color("2a5a2a")]
+	for i in 3:
+		var mat := Mats.plain(cols[i], 0.7, 0.0)
+		var x := -0.06 + i * 0.06
+		for seg: Array in [[-0.22, -0.13], [-0.13, -0.05], [-0.05, 0.03]]:
+			var y0: float = seg[0]
+			var y1: float = seg[1]
+			var w := _box(self, Vector3(0.012, y1 - y0, 0.012), mat, Vector3(x, (y0 + y1) * 0.5, -0.082))
+			if seg[0] == -0.13:
+				_wires.append(w)
+	_build_cover(0.07, "LIGHTING CIRCUIT\n%s" % zone)
 
 
 ## A screwed-on duct grille: solid until you take it off.
@@ -443,6 +480,8 @@ func use_label(game: Game) -> String:
 				return "Port locked  ·  %ds" % ceili(locked)
 			if capped and not cover_open:
 				return "Unscrew the cover"
+			if cracked:
+				return "Connect the nettop  ·  session cached, straight in"
 			if game.has_badge:
 				return "Connect the nettop  ·  badge login, clean"
 			if creds_known:
@@ -451,7 +490,9 @@ func use_label(game: Game) -> String:
 		Kind.RELAY:
 			return "" if sabotaged else "Sabotage relay"
 		Kind.BREAKER:
-			return "" if sabotaged else "Cut power  ·  %s" % zone
+			if sabotaged:
+				return ""
+			return "Cut the wires  ·  %s" % zone if cover_open else "Unscrew the cover"
 		Kind.VENT:
 			return "" if sabotaged else "Unscrew the vent grille"
 		Kind.LAPTOP:
@@ -465,7 +506,7 @@ func use_time(_game: Game) -> float:
 	match kind:
 		Kind.ACCESS: return 5.0 if capped and not cover_open else 1.6
 		Kind.RELAY: return 6.0
-		Kind.BREAKER: return 1.0
+		Kind.BREAKER: return 2.5 if cover_open else 5.0
 		Kind.VENT: return 2.5
 	return 0.8
 
@@ -476,6 +517,7 @@ func use_sound() -> String:
 		Kind.VENT: return "vent_loop"
 		Kind.RELAY: return "relay_loop"
 		Kind.ACCESS: return "vent_loop" if capped and not cover_open else "work_loop"
+		Kind.BREAKER: return "work_loop" if cover_open else "vent_loop"
 	return "work_loop"
 
 
@@ -511,9 +553,11 @@ func on_used(game: Game) -> void:
 			_led_mat.emission_energy_multiplier = 0.0
 			game.jam_comms(self)
 		Kind.BREAKER:
-			sabotaged = true
-			_led_mat.emission = Color("ff4a3a")
-			game.set_zone_power(self, false)
+			if not cover_open:
+				_set_cover(true)
+				Sfx.play_at("impact_metal", global_position, -14.0)
+			else:
+				cut_power(game)
 		Kind.LAPTOP:
 			if copy_state == "idle":
 				copy_state = "copying"
@@ -527,6 +571,17 @@ func on_used(game: Game) -> void:
 				game.data_downloaded()
 
 
+## Cutters through the feed: the zone goes dark until someone rewires it.
+func cut_power(game: Game) -> void:
+	sabotaged = true
+	_led_mat.emission = Color("ff4a3a")
+	for w in _wires:
+		w.visible = false
+	game.fx.burst("spark", global_position + Vector3(0, -0.13, -0.1))
+	Sfx.play_at("impact_metal", global_position, -12.0, true, 1.6)
+	game.set_zone_power(self, false)
+
+
 ## A guard put things back the way they were.
 func repaired(game: Game) -> void:
 	repair_pending = false
@@ -537,6 +592,8 @@ func repaired(game: Game) -> void:
 		Kind.BREAKER:
 			sabotaged = false
 			_led_mat.emission = Color("40ff90")
+			for w in _wires:
+				w.visible = true
 			game.set_zone_power(self, true)
 		Kind.CAMERA:
 			disabled = false
@@ -597,6 +654,9 @@ func tick(dt: float, game: Game) -> void:
 		locked = maxf(0.0, locked - dt)
 		_led_mat.emission = Color("ff4a3a") if locked > 0.0 else (Color("4ad0ff") if label == "SECURITY TERMINAL" else Color("40ff90"))
 		_tick_access(dt, game)
+		return
+	if kind == Kind.BREAKER:
+		_tick_cover(dt, game)
 		return
 	if kind == Kind.LAPTOP:
 		if copy_state == "copying":
@@ -669,24 +729,30 @@ func tick(dt: float, game: Game) -> void:
 
 ## Screws back out while the cover is being worked on, the cover swings down and hangs, the
 ## sticker is read by looking at it, and the nettop comes out of the pack and gets cabled up.
+## Screws back out as you work; once off, the cover swings down on its hinge.
+func _tick_cover(dt: float, game: Game) -> void:
+	if not _cover:
+		return
+	if not cover_open:
+		var prog: float = game.use_progress.get(self, 0.0) if game.use_target == self else 0.0
+		for i in _screws.size():
+			_screws[i].visible = prog < (i + 1) / 4.0
+			_screws[i].position.z = -0.024 - 0.02 * clampf(prog * 4.0 - i, 0.0, 1.0)
+	else:
+		_cover_t = minf(1.0, _cover_t + dt / 0.7)
+		var k := 1.0 - pow(1.0 - _cover_t, 3.0)
+		_cover.rotation.x = -deg_to_rad(165.0) * k
+		if kind == Kind.ACCESS and not creds_known and _cover_t >= 1.0:
+			var to := sticker_pos() - game.player.eye_pos()
+			if to.length() < 2.4 and to.normalized().dot(game.player.view_dir()) > 0.9:
+				_read_t += dt
+				if _read_t > 0.5:
+					creds_known = true
+					game.creds_read(self)
+
+
 func _tick_access(dt: float, game: Game) -> void:
-	if _cover:
-		if not cover_open:
-			var prog: float = game.use_progress.get(self, 0.0) if game.use_target == self else 0.0
-			for i in _screws.size():
-				_screws[i].visible = prog < (i + 1) / 4.0
-				_screws[i].position.z = -0.024 - 0.02 * clampf(prog * 4.0 - i, 0.0, 1.0)
-		else:
-			_cover_t = minf(1.0, _cover_t + dt / 0.7)
-			var k := 1.0 - pow(1.0 - _cover_t, 3.0)
-			_cover.rotation.x = -deg_to_rad(165.0) * k
-			if not creds_known and _cover_t >= 1.0:
-				var to := sticker_pos() - game.player.eye_pos()
-				if to.length() < 2.4 and to.normalized().dot(game.player.view_dir()) > 0.9:
-					_read_t += dt
-					if _read_t > 0.5:
-						creds_known = true
-						game.creds_read(self)
+	_tick_cover(dt, game)
 	if plugged:
 		_plug_t = minf(1.0, _plug_t + dt / 0.6)
 		var k2 := 1.0 - pow(1.0 - _plug_t, 2.0)
@@ -714,6 +780,11 @@ func _can_see(game: Game, target: Vector3) -> bool:
 
 func sees_point(game: Game, target: Vector3) -> bool:
 	return camera_live() and _can_see(game, target)
+
+
+## Whether the feed shows a picture (a looped camera still shows its loop).
+func feed_live() -> bool:
+	return kind == Kind.CAMERA and not destroyed and not disabled
 
 
 ## Transform for the CCTV feed camera.
