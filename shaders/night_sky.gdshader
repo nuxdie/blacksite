@@ -10,8 +10,8 @@ float hash(vec3 p) {
 void sky() {
 	vec3 d = EYEDIR;
 	float h = d.y;
-	vec3 c = mix(vec3(0.05, 0.065, 0.09), vec3(0.006, 0.008, 0.016), smoothstep(-0.05, 0.6, h));
-	c += vec3(0.12, 0.08, 0.05) * pow(1.0 - abs(h), 14.0) * 0.6;
+	vec3 c = mix(vec3(0.11, 0.13, 0.18), vec3(0.015, 0.02, 0.04), smoothstep(-0.05, 0.6, h));
+	c += vec3(0.3, 0.2, 0.12) * pow(1.0 - abs(h), 10.0) * 0.6;
 	if (!AT_CUBEMAP_PASS) {
 		vec3 q = floor(d * 420.0);
 		float s = hash(q);

@@ -17,6 +17,8 @@ var intel_pos := Vector3(46, 5.0, 28.2)
 var player_start := Vector3(-54.2, 0, -26.5)
 var player_start_yaw := -0.92
 var _moon_dir := MOON_DIR.normalized()
+var env: Environment
+const EXPOSURE := 1.25
 
 
 func build() -> void:
@@ -190,7 +192,7 @@ func add_pickup(kind: Pickup.Kind, pos: Vector3, amount := 1, permanent := true)
 # ------------------------------------------------------------------ look
 
 func _environment() -> void:
-	var env := Environment.new()
+	env = Environment.new()
 	var sky_mat := ShaderMaterial.new()
 	sky_mat.shader = preload("res://shaders/night_sky.gdshader")
 	sky_mat.set_shader_parameter("moon_dir", _moon_dir)
@@ -198,36 +200,42 @@ func _environment() -> void:
 	sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
+	# readable night: a cool moonlit fill so shapes always read, with lamps as warm pools
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("46566e")
-	env.ambient_light_energy = 0.42
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.05
+	env.ambient_light_color = Color("6a7ea3")
+	env.ambient_light_energy = 0.5
+	env.tonemap_mode = Environment.TONE_MAPPER_AGX
+	apply_brightness()
 	env.glow_enabled = true
-	env.glow_intensity = 0.55
-	env.glow_bloom = 0.04
-	env.glow_hdr_threshold = 1.1
+	env.glow_intensity = 0.5
+	env.glow_bloom = 0.03
+	env.glow_hdr_threshold = 1.2
 	env.ssao_enabled = true
 	env.ssao_radius = 1.2
-	env.ssao_intensity = 1.6
+	env.ssao_intensity = 1.4
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.022
+	env.volumetric_fog_density = 0.011
 	env.volumetric_fog_albedo = Color("a8b4c8")
 	env.volumetric_fog_anisotropy = 0.5
 	env.volumetric_fog_length = 70.0
-	env.volumetric_fog_ambient_inject = 0.25
+	env.volumetric_fog_ambient_inject = 0.35
 	env.volumetric_fog_sky_affect = 0.2
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	var moon := DirectionalLight3D.new()
-	moon.light_color = Color("9fb4ff")
-	moon.light_energy = 0.55
+	moon.light_color = Color("a9bcff")
+	moon.light_energy = 1.0
 	moon.shadow_enabled = true
 	moon.directional_shadow_max_distance = 90.0
 	moon.light_volumetric_fog_energy = 0.4
 	add_child(moon)
 	moon.look_at_from_position(_moon_dir * 80.0, Vector3.ZERO)
+
+
+func apply_brightness() -> void:
+	if env:
+		env.tonemap_exposure = EXPOSURE * Settings.brightness
 
 
 # ------------------------------------------------------------------ the compound

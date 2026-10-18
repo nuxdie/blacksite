@@ -4,6 +4,8 @@ extends Node
 const PATH := "user://settings.cfg"
 
 var sensitivity := 0.0021
+## Exposure multiplier for the night scene.
+var brightness := 1.0
 var primary := "carbine"
 var gadgets: Array[String] = ["frag", "smoke"]
 var learned: Dictionary = {}
@@ -95,6 +97,7 @@ func load_settings() -> void:
 	if cfg.load(PATH) != OK:
 		return
 	sensitivity = cfg.get_value("input", "sensitivity", sensitivity)
+	brightness = cfg.get_value("video", "brightness", brightness)
 	primary = cfg.get_value("loadout", "primary", primary)
 	var g: Array = cfg.get_value("loadout", "gadgets", gadgets)
 	gadgets.clear()
@@ -109,6 +112,7 @@ func save_settings() -> void:
 		return
 	var cfg := ConfigFile.new()
 	cfg.set_value("input", "sensitivity", sensitivity)
+	cfg.set_value("video", "brightness", brightness)
 	cfg.set_value("loadout", "primary", primary)
 	cfg.set_value("loadout", "gadgets", gadgets)
 	cfg.set_value("hints", "learned", learned)

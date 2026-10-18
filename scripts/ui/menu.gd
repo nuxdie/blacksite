@@ -230,6 +230,18 @@ func show_controls() -> void:
 		Settings.sensitivity = v / 1000.0
 		Settings.save_settings())
 	sens_row.add_child(slider)
+	sens_row.add_child(Style.label("Brightness", 16, Style.DIM))
+	var bright := HSlider.new()
+	bright.min_value = 0.6
+	bright.max_value = 1.8
+	bright.step = 0.05
+	bright.value = Settings.brightness
+	bright.custom_minimum_size = Vector2(240, 24)
+	bright.value_changed.connect(func(v: float) -> void:
+		Settings.brightness = v
+		game.facility.apply_brightness()
+		Settings.save_settings())
+	sens_row.add_child(bright)
 	_panel.add_child(sens_row)
 	_spacer(8)
 	_buttons([["BACK", show_pause], ["RESET TIPS", _reset_tips, false]])
