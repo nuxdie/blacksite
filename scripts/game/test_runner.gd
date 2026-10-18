@@ -3,6 +3,7 @@ extends Node
 ## Automated checks, enabled with user arguments after "--":
 ##   --autotest          run gameplay checks and print results as JSON, then quit
 ##   --shots=<dir>       capture screenshots at fixed viewpoints (needs a window)
+##   --uishots=<dir>     capture the HUD in a series of game states (needs a window)
 ##   --sim=<seconds>     run a combat bot for that long and report
 
 var game: Game
@@ -21,6 +22,8 @@ func start() -> void:
 	game.god_mode = true
 	if _args.has("shots"):
 		await _shots(_args["shots"])
+	if _args.has("uishots"):
+		await _ui_shots(_args["uishots"])
 	if _args.has("autotest"):
 		await _autotest()
 	if _args.has("sim"):
@@ -571,6 +574,61 @@ func _shots(dir: String) -> void:
 	_snap(dir + "/tablet.png")
 	game.close_tablet()
 	await _sight_shots(dir)
+
+
+## The interface in the situations it has to make clear.
+func _ui_shots(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	await _fresh("carbine")
+	await get_tree().create_timer(1.0).timeout
+	_snap(dir + "/ui_start.png")
+	# a guard is starting to notice you
+	game.player.global_position = Vector3(-17, 0, -12)
+	var g := _find("yard", -10.0)
+	_look_at(g.head_pos())
+	g.aware = 0.55
+	g.state = Soldier.State.SUSPICIOUS
+	g.investigate = game.player.global_position
+	await get_tree().create_timer(0.4).timeout
+	_snap(dir + "/ui_noticed.png")
+	# combat, site alarm, wounded and bleeding
+	game.god_mode = false
+	game.player.take_damage(28.0, g.global_position, false, "legs")
+	g.alert(game.player.global_position, "saw")
+	game.hq.raise_alarm(game.player.global_position)
+	game.god_mode = true
+	await get_tree().create_timer(1.2).timeout
+	_snap(dir + "/ui_combat.png")
+	# reloading
+	game.player.weapons.mag[0] = 4
+	game.player.weapons.start_reload()
+	await get_tree().create_timer(0.5).timeout
+	_snap(dir + "/ui_reload.png")
+	# using a device, comms down, data copying
+	await _fresh("carbine")
+	game.comms_down = true
+	var lap := _device("LAPTOP")
+	lap.on_used(game)
+	var term := _device("SECURITY TERMINAL")
+	game.player.global_position = Vector3(-12.5, 0, -17.2)
+	await get_tree().create_timer(0.2).timeout
+	_look_at(term.use_point())
+	Input.action_press("interact")
+	await get_tree().create_timer(0.8).timeout
+	_snap(dir + "/ui_using.png")
+	Input.action_release("interact")
+	# extraction
+	await _fresh("carbine")
+	game.mission = "extract"
+	game.hq.caution("test")
+	game.player.global_position = Vector3(-40, 0, -28)
+	game.player.yaw = PI / 2
+	await get_tree().create_timer(0.8).timeout
+	_snap(dir + "/ui_extract.png")
+	game.pause()
+	await get_tree().create_timer(0.3).timeout
+	_snap(dir + "/ui_pause.png")
+	game.resume()
 
 
 ## Hip and aimed views of every weapon against the same backdrop.

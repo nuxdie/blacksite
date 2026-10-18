@@ -184,7 +184,15 @@ func _stats() -> void:
 func show_pause() -> void:
 	_clear()
 	_title("PAUSED", Style.INK, 56)
-	_spacer(4)
+	_tag(game.objective_text())
+	var items: Array = game.hud.status_items()
+	if not items.is_empty():
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 22)
+		for it: Array in items:
+			row.add_child(Style.label(it[0], 15, it[1], Style.semibold))
+		_panel.add_child(row)
+	_spacer(8)
 	_stats()
 	_spacer(10)
 	_buttons([["RESUME", game.resume], ["RESTART", game.start_mission, false], ["CONTROLS", show_controls, false], ["ABANDON", game.to_menu, false]])

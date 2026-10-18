@@ -88,7 +88,7 @@ func reset() -> void:
 	_subs.clear()
 	_toast_t = 0.0
 	_banner_t = 0.0
-	hints.current = {}
+	hints.reset()
 
 
 # ------------------------------------------------------------------ events
@@ -150,7 +150,7 @@ func refresh(dt: float) -> void:
 		_ammo_a = 4.0
 	var ammo_on := w.reload_t > 0.0 or p.ads > 0.5 or w.aiming_throw or w.mag[w.cur] <= w.current().mag_size * 0.25
 	_ammo_a = maxf(1.0 if ammo_on else 0.0, _ammo_a - dt)
-	var vit_on := p.hp < 70.0 or p.bleed > 0.0 or p.leg_wound or p.bandage_t >= 0.0 or p.last_hit < 4.0 or p.crouched or absf(p.lean_k) > 0.5 or p.drag_body != null
+	var vit_on := p.hp < 70.0 or p.bleed > 0.0 or p.leg_wound or p.bandage_t >= 0.0 or p.last_hit < 4.0
 	_vitals_a = minf(1.0, _vitals_a + dt * 4.0) if vit_on else maxf(0.0, _vitals_a - dt * 0.5)
 	var open := game.tablet_access != null
 	_feed_rect.visible = open
@@ -229,6 +229,7 @@ func _draw_overlay() -> void:
 	if game.tablet_access:
 		_draw_tablet(size)
 	_draw_compass(size)
+	_draw_status(size)
 	_draw_markers()
 	if p.alive and not game.tablet_access:
 		_draw_sights(c)
@@ -246,13 +247,13 @@ func _draw_overlay() -> void:
 		var y := size.y - 120.0 - (_subs.size() - 1 - i) * 26.0
 		var who: String = s.who
 		var line: String = s.text
-		var ww := _f_small.get_string_size(who, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		var ww := _f_small.get_string_size(who, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
 		var lw := Style.semibold.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 19).x
 		var x := c.x - (ww + 10 + lw) * 0.5
-		_text(Vector2(x, y), who, 13, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+		_text(Vector2(x, y), who, 14, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
 		_text(Vector2(x + ww + 10, y), line, 19, Color(Style.INK, a), HORIZONTAL_ALIGNMENT_LEFT, Style.semibold)
 	if _toast_t > 0.0:
-		_text(Vector2(c.x, size.y * 0.4), _toast, 15, Color(Style.DIM, minf(1.0, _toast_t * 3.0)), HORIZONTAL_ALIGNMENT_CENTER)
+		_text(Vector2(c.x, size.y * 0.36), _toast, 15, Color(Style.DIM, minf(1.0, _toast_t * 3.0)), HORIZONTAL_ALIGNMENT_CENTER)
 	if _banner_t > 0.0:
 		_text(Vector2(c.x, size.y * 0.3), _banner, 30, Color(Style.INK, minf(1.0, _banner_t * 2.0)), HORIZONTAL_ALIGNMENT_CENTER, _f_wide)
 
@@ -339,20 +340,73 @@ func _draw_hack(c: Vector2) -> void:
 		if prog > 0.0:
 			_overlay.draw_arc(c, 26.0, 0.0, TAU, 48, Color(1, 1, 1, 0.15), 3.0)
 			_overlay.draw_arc(c, 26.0, -PI / 2.0, -PI / 2.0 + TAU * prog, 48, Style.AMBER, 3.0)
-			_text(c + Vector2(0, 50), "%s  %d%%" % [u.label, roundi(prog * 100.0)], 13, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
-	var y := 96.0
-	var cx := _overlay.size.x * 0.5
+			_text(c + Vector2(0, 5), "%d" % roundi(prog * 100.0), 14, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+
+
+## The state of the night in one line under the objective: are you seen, how alert is the site,
+## and anything running in the background. Nothing shows while all is quiet.
+func status_items() -> Array:
+	var out := []
+	var spotted := false
+	var hunted := false
+	var noticed := false
+	for s in game.soldiers:
+		if not s.alive:
+			continue
+		if s.state == Soldier.State.COMBAT:
+			hunted = true
+			spotted = spotted or s.sees
+		elif s.state == Soldier.State.SUSPICIOUS or s.aware > 0.25:
+			noticed = true
+	for dv in game.facility.devices:
+		if dv.camera_live() and dv.sees_player and dv.aware > 0.25:
+			noticed = true
+	if spotted:
+		out.append(["SPOTTED", Style.RED])
+	elif hunted:
+		out.append(["THEY'RE SEARCHING", Style.AMBER])
+	elif noticed:
+		out.append(["DRAWING ATTENTION", Style.AMBER])
+	match game.hq.level:
+		Command.Level.CAUTION:
+			out.append(["SITE ON CAUTION", Style.AMBER])
+		Command.Level.ALARM:
+			out.append(["ALARM", Style.RED])
+	if game.reinforce_t > 0.0:
+		var t := ceili(game.reinforce_t)
+		out.append(["REACTION FORCE  %d:%02d" % [t / 60, t % 60], Style.RED])
+	if game.comms_down:
+		out.append(["THEIR RADIO IS DOWN", Style.GREEN])
 	var lap := _laptop()
 	if lap and lap.copy_state == "copying":
-		_text(Vector2(cx, y), "COPYING DATA  %d%%" % roundi(lap.copy_progress * 100.0), 13, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
-		_overlay.draw_rect(Rect2(cx - 70, y + 6, 140, 2), Color(1, 1, 1, 0.15))
-		_overlay.draw_rect(Rect2(cx - 70, y + 6, 140 * lap.copy_progress, 2), Style.AMBER)
-		y += 22.0
-	if game.comms_down:
-		_text(Vector2(cx, y), "ENEMY COMMS DOWN", 13, Style.GREEN, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
-		y += 18.0
+		out.append(["COPYING  %d%%" % roundi(lap.copy_progress * 100.0), Style.INK])
+	elif lap and lap.copy_state == "done" and game.mission == "infil":
+		out.append(["COPY COMPLETE", Style.GREEN])
 	if game.trace > 0.5 and not game.tablet_access:
-		_text(Vector2(cx, y), "NETWORK TRACE  %d%%" % roundi(game.trace), 13, Style.RED if game.trace > 70.0 else Style.DIM, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+		out.append(["TRACE  %d%%" % roundi(game.trace), Style.RED if game.trace > 70.0 else Style.DIM])
+	return out
+
+
+func _draw_status(size: Vector2) -> void:
+	var items := status_items()
+	if items.is_empty():
+		return
+	var gap := 22.0
+	var widths: Array[float] = []
+	var total := 0.0
+	for it: Array in items:
+		var w := 12.0 + _f_small.get_string_size(it[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+		widths.append(w)
+		total += w
+	total += gap * (items.size() - 1)
+	var x := size.x * 0.5 - total * 0.5
+	var y := 98.0
+	for i in items.size():
+		var col: Color = items[i][1]
+		var pulse := 0.55 + 0.45 * absf(sin(game.time * 4.0)) if col == Style.RED else 1.0
+		_overlay.draw_circle(Vector2(x + 3, y - 4.5), 3.0, Color(col, pulse))
+		_text(Vector2(x + 12, y), items[i][0], 14, col, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+		x += widths[i] + gap
 
 
 func _laptop() -> Device:
@@ -379,7 +433,7 @@ func _draw_tablet(size: Vector2) -> void:
 	_overlay.draw_rect(Rect2(fr.position.x, fr.end.y, fr.size.x, outer.end.y - fr.end.y), bg)
 	_overlay.draw_rect(outer, Color(1, 1, 1, 0.12), false, 1.0)
 	var header := "SECURITY NETWORK  ·  %s  ·  %s" % [game.tablet_access.label, "ADMIN" if game.tablet_admin else "EXPLOIT SESSION"]
-	_text(r.position + Vector2(0, -22), header, 13, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+	_text(r.position + Vector2(0, -22), header, 14, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
 	var list_w := 210.0
 	for i in cams.size():
 		var cam := cams[i]
@@ -409,7 +463,7 @@ func _draw_tablet(size: Vector2) -> void:
 	_feed_rect.size = feed.size
 	_overlay.draw_rect(feed, Color(1, 1, 1, 0.15), false, 1.0)
 	var secs := int(game.time) + 7_380
-	_text(feed.position + Vector2(10, 20), "%s   02:%02d:%02d" % [sel.label, (secs / 60) % 60, secs % 60], 13, Color(1, 1, 1, 0.8), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+	_text(feed.position + Vector2(10, 20), "%s   02:%02d:%02d" % [sel.label, (secs / 60) % 60, secs % 60], 14, Color(1, 1, 1, 0.8), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
 	if fmod(game.time, 1.0) < 0.5:
 		_overlay.draw_circle(feed.position + Vector2(feed.size.x - 16, 15), 4.0, Style.RED)
 	# trace
@@ -478,42 +532,47 @@ func _draw_arcs(c: Vector2) -> void:
 		var pos := c + Vector2(cos(a), sin(a)) * 165.0
 		var blink := 1.0 if fmod(game.time * 10.0, 2.0) < 1.0 else 0.4
 		_overlay.draw_circle(pos, 9.0, Color(Style.RED if not g.owner_is_player else Style.AMBER, blink))
-		_text(pos + Vector2(0, 5), "!", 13, Color.BLACK, HORIZONTAL_ALIGNMENT_CENTER, Style.bold)
+		_text(pos + Vector2(0, 5), "!", 14, Color.BLACK, HORIZONTAL_ALIGNMENT_CENTER, Style.bold)
 
 
 func _draw_vitals(size: Vector2) -> void:
 	var p := game.player
+	var x := 34.0
+	var y := size.y - 34.0
+	# always: how visible you are and how you're standing
+	var lit := game.player_light
+	var light_txt := "IN SHADOW" if lit < 0.45 else ("LOW LIGHT" if lit < 0.7 else "LIT")
+	var light_col := Style.DIM if lit < 0.45 else (Style.INK if lit < 0.7 else Style.AMBER)
+	for i in 5:
+		var on := lit >= 0.22 + i * 0.18
+		_overlay.draw_rect(Rect2(x + i * 7.0, y - 4.0, 5, 8), Color(light_col, 0.9) if on else Style.FAINT)
+	var bx := x + 44.0
+	bx += _text(Vector2(bx, y + 4), light_txt, 14, light_col, HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
+	var stance := "DRAGGING" if p.drag_body else ("CROUCHED" if p.crouched else ("SPRINTING" if p.sprinting else "STANDING"))
+	if absf(p.lean_k) > 0.5:
+		stance += "  ·  LEAN " + ("L" if p.lean_k < 0.0 else "R")
+	_text(Vector2(bx, y + 4), stance, 14, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+	# health and wounds, while they matter
 	var a := clampf(_vitals_a, 0.0, 1.0)
 	if a <= 0.01:
 		return
-	var x := 34.0
-	var y := size.y - 34.0
 	var low := p.hp < 30.0
 	var col := Color(Style.RED if low else Style.INK, a)
-	_text(Vector2(x, y - 26), str(ceili(p.hp)), 34, col, HORIZONTAL_ALIGNMENT_LEFT, _f_num)
-	var bar := Rect2(x, y - 14, 220, 4)
+	_text(Vector2(x, y - 40), str(ceili(p.hp)), 34, col, HORIZONTAL_ALIGNMENT_LEFT, _f_num)
+	var bar := Rect2(x, y - 28, 220, 4)
 	_overlay.draw_rect(bar, Color(Style.FAINT, Style.FAINT.a * a))
 	_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * p.hp / Player.MAX_HP, bar.size.y)), col)
 	if p.bleed > 0.0:
 		var lost := minf(p.hp, p.bleed * 10.0) / Player.MAX_HP * bar.size.x
 		var pulse := 0.45 + 0.4 * sin(game.time * 6.0)
 		_overlay.draw_rect(Rect2(bar.position.x + bar.size.x * p.hp / Player.MAX_HP - lost, bar.position.y, lost, bar.size.y), Color(Style.RED, pulse * a))
-	var bits: Array[String] = []
-	if p.drag_body:
-		bits.append("DRAGGING")
-	elif p.crouched:
-		bits.append("CROUCHED")
-	if absf(p.lean_k) > 0.5:
-		bits.append("LEAN " + ("L" if p.lean_k < 0.0 else "R"))
-	var bx := x
-	if not bits.is_empty():
-		bx += _text(Vector2(bx, y + 6), "  ·  ".join(bits), 13, Color(Style.DIM, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
+	var wx := x + 70.0
 	if p.bandage_t >= 0.0:
-		bx += _text(Vector2(bx, y + 6), "BANDAGING  %d%%" % roundi(p.bandage_t / Player.BANDAGE_TIME * 100.0), 13, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
+		wx += _text(Vector2(wx, y - 40), "BANDAGING  %d%%" % roundi(p.bandage_t / Player.BANDAGE_TIME * 100.0), 14, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
 	elif p.bleed > 0.0:
-		bx += _text(Vector2(bx, y + 6), "BLEEDING", 13, Color(Style.RED, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
+		wx += _text(Vector2(wx, y - 40), "BLEEDING", 14, Color(Style.RED, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small) + 14.0
 	if p.leg_wound:
-		_text(Vector2(bx, y + 6), "LEG WOUND", 13, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+		_text(Vector2(wx, y - 40), "LEG WOUND", 14, Color(Style.AMBER, a), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
 
 
 func _draw_ammo(size: Vector2) -> void:
@@ -545,13 +604,13 @@ func _draw_ammo(size: Vector2) -> void:
 	var line := cur.display_name + "  ·  " + cur.caliber
 	if cur.modes.size() > 1:
 		line += "  ·  " + w.fire_mode()
-	_text(Vector2(x, y + 6), line, 13, Color(Style.DIM, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
+	_text(Vector2(x, y + 6), line, 14, Color(Style.DIM, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
 	var gx := x
 	for i in range(w.gadgets.size() - 1, -1, -1):
 		var g: Dictionary = w.gadgets[i]
 		var t := "%s %d" % [Gadget.INFO[g.type].name, int(g.n)]
 		var sel := i == w.gsel
-		gx -= _text(Vector2(gx, y + 24), t, 13, Color(Style.INK if sel else Style.DIM, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small) + 16.0
+		gx -= _text(Vector2(gx, y + 24), t, 14, Color(Style.INK if sel else Style.DIM, a), HORIZONTAL_ALIGNMENT_RIGHT, _f_small) + 16.0
 
 
 ## Context: only what you can do right now.
@@ -573,7 +632,7 @@ func _prompts() -> Array:
 	if game.tablet_access:
 		return out
 	if game.using and game.use_target:
-		out.append([["interact"], "Keep holding"])
+		out.append([["interact"], "Keep holding  ·  " + game.use_target.use_label(game)])
 		return out
 	if game.use_target and not game.takedown_target():
 		var u := game.use_target

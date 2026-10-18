@@ -41,6 +41,13 @@ var defs: Array[Dictionary] = [
 ]
 
 
+func reset() -> void:
+	current = {}
+	alpha = 0.0
+	_cooldown.clear()
+	_events.clear()
+
+
 func event(name: String) -> void:
 	_events[name] = true
 
