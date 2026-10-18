@@ -71,6 +71,7 @@ func _ready() -> void:
 	_emitters["blood"] = _make_emitter(10, 0.5, Color(0.32, 0.02, 0.02, 0.85), 2.5, 0.07, 0.3, 3.0, Vector3(0, -4, 0), false)
 	_emitters["fire"] = _make_emitter(40, 0.45, Color(4.0, 2.0, 0.6, 1.0), 9.0, 0.8, 0.2, 3.0, Vector3.ZERO, true)
 	_emitters["smoke"] = _make_emitter(26, 2.6, Color(0.12, 0.115, 0.11, 0.9), 3.0, 1.2, 4.0, 1.2, Vector3(0, 0.4, 0), false)
+	_emitters["puff"] = _make_emitter(5, 1.6, Color(0.55, 0.55, 0.55, 0.3), 0.35, 0.04, 0.22, 1.5, Vector3(0, 0.25, 0), false)
 	_emitters["glass"] = _make_emitter(24, 0.8, Color(2.5, 2.4, 2.2, 1.0), 4.0, 0.03, 0.02, 0.5, Vector3(0, -9.8, 0), true)
 
 

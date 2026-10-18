@@ -505,6 +505,7 @@ func _autotest() -> void:
 	r["drones"] = await _drones()
 	r["multitool"] = await _multitool()
 	r["breach"] = await _breach()
+	r["social"] = await _social()
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -606,6 +607,38 @@ func _multitool() -> Dictionary:
 
 ## Drones: scan from above, raise the alarm, grounded by comms-down, shot down, and no sight
 ## through walls or roofs.
+## Guards off duty: two posted close together fall into a chat; one alone lights a cigarette.
+func _social() -> Dictionary:
+	var c := {}
+	await _fresh("carbine")
+	var a := _find("yard", -10.0)
+	var b := _find("yard", -12.5)
+	_isolate([a, b])
+	game.player.global_position = Vector3(-40, 0, 30)
+	for s: Soldier in [a, b]:
+		s.patrol.clear()
+		s.global_position = Vector3(-10.0 if s == a else -12.5, 0, -10.0)
+		s.post = s.global_position
+		s.smoke_cool = 999.0
+	a.chat_cool = 0.0
+	await _frames(150)
+	c["chat_started"] = a.chat == b and b.chat == a
+	c["chat_line_said"] = a.voice_t > 0.0 or b.voice_t > 0.0
+	c["face_each_other"] = absf(wrapf(a.yaw - Soldier.yaw_of(b.global_position - a.global_position), -PI, PI)) < 0.5
+	a.chat_t = 0.0
+	await _frames(10)
+	c["chat_ends"] = a.chat == null and b.chat == null
+	b.chat_cool = 999.0
+	a.chat_cool = 999.0
+	a.smoke_cool = 0.0
+	await _frames(30)
+	c["smoking"] = a.smoke_t > 0.0 and a.model.ember.visible and a.off_duty()
+	a.alert(game.player.global_position, "heard")
+	await _frames(5)
+	c["smoke_dropped_on_alert"] = a.smoke_t <= 0.0 and not a.model.ember.visible
+	return c
+
+
 ## Ways into the data office when its reader is dead: the axe on the door, or through a window.
 func _breach() -> Dictionary:
 	var c := {}

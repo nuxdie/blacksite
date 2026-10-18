@@ -99,6 +99,16 @@ var climb: Dictionary = {}
 var radio_t := 0.0
 ## Which rendered voice this guard speaks with (see Lines), and the line in progress.
 var voice := "g0"
+## Off duty for a minute: a cigarette at the post, or a word with whoever's standing near.
+## Both dull the eyes and ears a little, and a cigarette glows in the dark.
+var smoke_t := 0.0
+var smoke_cool := randf_range(30.0, 110.0)
+var puff_t := 0.0
+var chat: Soldier = null
+var chat_t := 0.0
+var chat_cool := randf_range(20.0, 80.0)
+var chat_turn := false
+var _chat_line_t := 0.0
 var _voice_player: AudioStreamPlayer3D
 var _voice_stream: AudioStream
 var _noticed := false
@@ -270,6 +280,7 @@ func steer_to(p: Vector3) -> Vector3:
 func alert(pos: Vector3, how: String) -> void:
 	if not alive:
 		return
+	_off_duty_over()
 	var now := game.time
 	if how == "saw":
 		squad.report(pos, now)
@@ -333,6 +344,8 @@ func _perceive(dt: float) -> void:
 		var center := clampf((fwd_dot - 0.2) / 0.7, 0.35, 1.0)
 		var exposure := 1.0 if sees_chest else 0.55
 		var rate := 1.9 / (1.0 + dist_p / 8.0) * stance * move * center * exposure * game.player_light * game.hq.vigilance()
+		if off_duty():
+			rate *= 0.6
 		aware += rate * dt * (1.5 if state == State.SUSPICIOUS else 1.0) + (dt * 2.0 if dist_p < 3.5 else 0.0)
 		investigate = p.global_position
 		notice = "lit" if game.player_light >= 0.7 else ("close" if dist_p < 6.0 else "seen")
@@ -343,6 +356,8 @@ func _perceive(dt: float) -> void:
 	var loud := 11.0 if p.sprinting else (0.0 if p.crouched or p.prone else (4.0 if p.speed_2d() > 1.0 else 0.0))
 	if game.hq.level == Command.Level.ALARM:
 		loud *= 0.5
+	if off_duty():
+		loud *= 0.7
 	if loud > 0.0 and global_position.distance_to(p.global_position) < loud:
 		# footsteps carry half as far through a wall
 		if sees_head or sees_chest or global_position.distance_to(p.global_position) < loud * 0.5:
@@ -472,13 +487,14 @@ func _check_stuck(dt: float) -> void:
 
 func _calm(dt: float) -> void:
 	crouch = false
+	_social(dt)
 	if not patrol.is_empty():
 		var wp := patrol[patrol_i]
 		if wait_t > 0.0:
 			wait_t -= dt
 			ground_move(Vector3.ZERO, 0.0, dt)
 			turn_to(look_yaw, 1.2, dt)
-			if randf() < dt * 0.4:
+			if chat == null and randf() < dt * 0.4:
 				look_yaw = yaw + randf_range(-1.2, 1.2)
 		else:
 			repath -= dt
@@ -509,11 +525,100 @@ func _calm(dt: float) -> void:
 	else:
 		ground_move(Vector3.ZERO, 0.0, dt)
 		look_t -= dt
-		if look_t <= 0.0:
+		if look_t <= 0.0 and chat == null:
 			look_t = randf_range(3.0, 7.0) / game.hq.vigilance()
 			look_yaw = base_yaw + randf_range(-0.9, 0.9) * game.hq.vigilance()
 		turn_to(look_yaw, 0.8, dt)
 	_check_corpses(dt)
+
+
+# ------------------------------------------------------------------ off duty
+
+## Standing where they're meant to be with nothing to do.
+func _idle_here() -> bool:
+	if not patrol.is_empty():
+		return wait_t > 0.0
+	return Vector2(post.x - global_position.x, post.z - global_position.z).length() <= 1.2
+
+
+func off_duty() -> bool:
+	return smoke_t > 0.0 or chat != null
+
+
+func _off_duty_over() -> void:
+	smoke_t = 0.0
+	if model:
+		model.ember.visible = false
+	if chat and chat.chat == self:
+		chat.chat = null
+	chat = null
+
+
+## A cigarette when it's quiet, a chat when someone's within a few steps. Patrollers hold at
+## their waypoint for it; posted guards don't move anyway.
+func _social(dt: float) -> void:
+	var quiet := game.hq.level == Command.Level.NORMAL and task.is_empty()
+	if smoke_t > 0.0:
+		smoke_t -= dt
+		puff_t -= dt
+		if puff_t <= 0.0:
+			puff_t = randf_range(3.5, 6.0)
+			game.fx.burst("puff", eye() + facing() * 0.2 + Vector3.DOWN * 0.08)
+		if not patrol.is_empty():
+			wait_t = maxf(wait_t, 0.3)
+		if smoke_t <= 0.0:
+			model.ember.visible = false
+	elif quiet and _idle_here() and chat == null:
+		smoke_cool -= dt
+		if smoke_cool <= 0.0:
+			smoke_cool = randf_range(150.0, 300.0)
+			smoke_t = randf_range(18.0, 30.0)
+			puff_t = 1.6
+			model.ember.visible = true
+			Sfx.play_at("flashlight", eye(), -12.0)
+			say("cig")
+	if chat:
+		var o := chat
+		if not o.alive or o.state != State.CALM or o.chat != self or chat_t <= 0.0 or not quiet:
+			_off_duty_over()
+			return
+		chat_t -= dt
+		if not patrol.is_empty():
+			wait_t = maxf(wait_t, 0.3)
+		look_yaw = yaw_of(o.global_position - global_position)
+		_chat_line_t -= dt
+		if chat_turn and _chat_line_t <= 0.0:
+			say("chatter" if randf() < 0.6 else "chat_reply")
+			if voice_t > 0.0:
+				# said: the other one answers in a few seconds
+				chat_turn = false
+				o.chat_turn = true
+				o._chat_line_t = randf_range(3.0, 5.0)
+			else:
+				_chat_line_t = 0.4
+	elif quiet and _idle_here():
+		chat_cool -= dt
+		if chat_cool <= 0.0:
+			chat_cool = randf_range(60.0, 150.0)
+			var o := _chat_partner()
+			if o:
+				chat = o
+				o.chat = self
+				chat_t = randf_range(20.0, 40.0)
+				o.chat_t = chat_t
+				chat_turn = true
+				o.chat_turn = false
+				_chat_line_t = 0.3
+				o.chat_cool = randf_range(60.0, 150.0)
+
+
+func _chat_partner() -> Soldier:
+	for o in game.soldiers:
+		if o == self or not o.alive or o.state != State.CALM or o.chat != null or not o.task.is_empty() or not o._idle_here():
+			continue
+		if global_position.distance_to(o.global_position) < 5.0 and game.los(eye(), o.eye()):
+			return o
+	return null
 
 
 func _suspicious(dt: float) -> void:
@@ -545,6 +650,7 @@ func _suspicious(dt: float) -> void:
 
 
 func assign_task(pos: Vector3, device: Device, work: float) -> void:
+	_off_duty_over()
 	task = {"pos": pos, "device": device, "work": work, "routed": false}
 	if device.kind != Device.Kind.LAPTOP:
 		say("repair")
@@ -944,6 +1050,7 @@ func die(dir: Vector3, headshot: bool, takedown: bool) -> void:
 	blind = 0.0
 	death_t = 0.0
 	_stop_voice()
+	_off_duty_over()
 	fall_side = randf_range(-0.4, 0.4)
 	if dir.length() > 0.1:
 		yaw = yaw_of(dir)

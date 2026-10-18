@@ -37,6 +37,9 @@
     "repair": ["I'll go take a look.", "On it, checking the box.", "I'll go reset it."],
     "pulled": ["Someone's been at the laptop!", "There's a drive in here!", "Who left this plugged in?"],
     "smoke": ["Smoke! Watch the smoke!", "He's in the smoke!"],
+    "cig": ["Going for a smoke.", "Two minutes. I need a cigarette.", "Watch the gate, I'm having one."],
+    "chatter": ["Quiet one tonight.", "You hear they're changing the rota again?", "Coffee machine's dead. Again.", "Two more hours and I'm done.", "This place gives me the creeps after midnight.", "My feet are killing me.", "Anyone actually checked the east fence this week?", "If it rains I'm going inside, I don't care what they say."],
+    "chat_reply": ["Yeah.", "Tell me about it.", "Ha. Right.", "Same as every night.", "Don't get me started.", "Mm."],
     "cover": ["Get down!", "Cover!", "Behind the wall, now!"],
     "check_in": ["%s, all clear.", "%s, nothing to report.", "%s here, quiet."]
   },

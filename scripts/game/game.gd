@@ -33,7 +33,7 @@ const REINFORCEMENTS := [
 	{"squad": "qrf", "type": "rifleman", "pos": Vector3(-2, 0, -33)},
 ]
 ## Lines guards shout rather than send over the radio; everything else is squad net traffic.
-const SHOUTED := ["contact", "heard", "nade", "nade_warn", "hit", "blind", "huh", "calm", "lights", "noise", "power", "body", "pulled", "smoke", "cover", "jammed"]
+const SHOUTED := ["contact", "heard", "nade", "nade_warn", "hit", "blind", "huh", "calm", "lights", "noise", "power", "body", "pulled", "smoke", "cover", "jammed", "cig", "chatter", "chat_reply"]
 const INTERIORS := ["WAREHOUSE", "MEZZANINE", "DATA OFFICE", "OFFICE", "SERVER ROOM", "ARMOURY", "GATEHOUSE"]
 
 var phase := Phase.LOADING

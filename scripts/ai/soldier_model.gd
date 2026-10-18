@@ -18,6 +18,9 @@ var flashlight: SpotLight3D
 var legs: Array[Dictionary] = []
 var support_arm: Node3D
 var radio_arm: Node3D
+## A cigarette: a point of orange light that moves between hip and mouth.
+var ember: Node3D
+var _ember_light: OmniLight3D
 var aim_pitch := 0.0
 var _radio_k := 0.0
 var _box_mesh := BoxMesh.new()
@@ -146,6 +149,15 @@ func build(profile: SoldierProfile) -> void:
 	_part(radio_arm, _box_mesh, cloth, Vector3(-0.17, 0.08, -0.12), Vector3(0.09, 0.22, 0.09), Vector3(-0.9, 0, -0.5))
 	_part(radio_arm, _box_mesh, glove, Vector3(-0.11, 0.16, -0.08), Vector3(0.07, 0.08, 0.08))
 	radio_arm.visible = false
+	ember = _pivot(torso, Vector3(-0.28, 0.12, -0.05))
+	_part(ember, _box_mesh, Mats.emissive(Color("ff6a1a"), 3.0), Vector3.ZERO, Vector3(0.012, 0.012, 0.03))
+	_ember_light = OmniLight3D.new()
+	_ember_light.light_color = Color("ff7a2a")
+	_ember_light.light_energy = 0.3
+	_ember_light.omni_range = 1.4
+	_ember_light.shadow_enabled = false
+	ember.add_child(_ember_light)
+	ember.visible = false
 	gun = _pivot(aim, Vector3(0.06, -0.1, -0.32))
 	match profile.weapon_kind:
 		"lmg":
@@ -211,7 +223,13 @@ func animate(dt: float, s: Soldier) -> void:
 	aim_pitch = lerpf(aim_pitch, pitch, minf(1.0, dt * 8.0))
 	# at rest the weapon hangs low across the body; alert, it comes up to the shoulder
 	var lowered := 0.75 if s.state == Soldier.State.CALM else (0.9 if s.reloading > 0.0 else (0.25 if s.state == Soldier.State.SUSPICIOUS else 0.0))
-	_radio_k = move_toward(_radio_k, 1.0 if s.radio_t > 0.0 else 0.0, dt * 6.0)
+	if s.smoke_t > 0.0:
+		lowered = 1.05
+	var hand_up := s.radio_t > 0.0 or (s.smoke_t > 0.0 and s.puff_t < 1.4)
+	_radio_k = move_toward(_radio_k, 1.0 if hand_up else 0.0, dt * 6.0)
+	if ember.visible:
+		ember.position = Vector3(-0.28, 0.12, -0.05).lerp(Vector3(-0.08, 0.6, -0.16), _radio_k)
+		_ember_light.light_energy = 0.25 + _radio_k * 0.5
 	radio_arm.visible = _radio_k > 0.5
 	support_arm.visible = not radio_arm.visible
 	if s.blind > 0.0:
