@@ -220,9 +220,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		game.interact()
 	elif event.is_action_pressed("bandage"):
 		start_bandage()
-	elif event.is_action_pressed("mark"):
-		game.mark_target()
-		game.hud.learn("mark")
 	elif event.is_action_pressed("jump"):
 		if vault_ok:
 			_start_vault()

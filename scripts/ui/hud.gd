@@ -325,19 +325,17 @@ func _draw_guard_states() -> void:
 			_text(sp + Vector2(0, -18), "CALLING IT IN", 12, Style.RED, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
 
 
-## Marked guards: live while you can see them, otherwise a hollow marker where you last saw them.
+## Tracked guards out of sight: a hollow marker where you last saw them, fading over 20 s.
+## Guards in plain view need no marker.
 func _draw_markers() -> void:
 	var cam := game.player.camera
-	var eye := game.player.eye_pos()
 	for s in game.soldiers:
 		if not s.alive or not s.tagged:
 			continue
-		var live := game.los(eye, s.head_pos())
-		if live:
-			s.tag_seen = s.global_position
-			s.tag_seen_t = game.time
 		var age := game.time - s.tag_seen_t
-		var a := 1.0 if live else clampf(1.0 - (age - 10.0) / 10.0, 0.0, 0.7)
+		if age < 0.6:
+			continue
+		var a := clampf(1.0 - (age - 10.0) / 10.0, 0.0, 0.8)
 		if a <= 0.0:
 			continue
 		var wp := s.tag_seen + Vector3.UP * 2.05
@@ -345,16 +343,9 @@ func _draw_markers() -> void:
 			continue
 		var sp := cam.unproject_position(wp)
 		var col := Style.RED if s.state == Soldier.State.COMBAT else (Style.AMBER if s.state == Soldier.State.SUSPICIOUS else Style.INK)
-		var pts := PackedVector2Array([sp + Vector2(0, -6), sp + Vector2(5, 0), sp + Vector2(0, 6), sp + Vector2(-5, 0)])
-		if live:
-			_overlay.draw_colored_polygon(pts, Color(col, a))
-		else:
-			pts.append(pts[0])
-			_overlay.draw_polyline(pts, Color(Style.DIM, a), 1.5)
-		var label := "%dm" % roundi(s.tag_seen.distance_to(game.player.global_position))
-		if not live:
-			label = "LAST SEEN  " + label
-		_text(sp + Vector2(0, -10), label, 11, Color(col if live else Style.DIM, 0.85 * a), HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+		var pts := PackedVector2Array([sp + Vector2(0, -6), sp + Vector2(5, 0), sp + Vector2(0, 6), sp + Vector2(-5, 0), sp + Vector2(0, -6)])
+		_overlay.draw_polyline(pts, Color(col, a), 1.5)
+		_text(sp + Vector2(0, -10), "%dm" % roundi(s.tag_seen.distance_to(game.player.global_position)), 11, Color(col, 0.7 * a), HORIZONTAL_ALIGNMENT_CENTER, _f_small)
 
 
 ## No crosshair: at the hip there is only a faint dot where the eye rests; aiming uses the

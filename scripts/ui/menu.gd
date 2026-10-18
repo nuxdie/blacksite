@@ -195,7 +195,11 @@ func show_pause() -> void:
 	_spacer(8)
 	_stats()
 	_spacer(10)
-	_buttons([["RESUME", game.resume], ["RESTART", game.start_mission, false], ["CONTROLS", show_controls, false], ["ABANDON", game.to_menu, false]])
+	var row := [["RESUME", game.resume]]
+	if SaveGame.exists():
+		row.append(["LOAD QUICKSAVE", game.quickload, false])
+	row.append_array([["RESTART", game.start_mission, false], ["CONTROLS", show_controls, false], ["ABANDON", game.to_menu, false]])
+	_buttons(row)
 
 
 func show_controls() -> void:
@@ -210,7 +214,7 @@ func show_controls() -> void:
 		["move_forward", "Move (WASD)"], ["sprint", "Sprint · hold breath when scoped"], ["crouch", "Crouch"], ["crouch_hold", "Crouch while held"],
 		["jump", "Jump · vault"], ["lean_left", "Lean left"], ["lean_right", "Lean right"], ["aim", "Aim · aim over low cover"],
 		["fire", "Fire"], ["reload", "Reload"], ["fire_mode", "Fire mode"], ["primary", "Primary"], ["sidearm", "Sidearm"],
-		["hack", "Disconnect tablet"], ["gadget", "Equipment (hold, release)"], ["gadget_cycle", "Switch equipment"], ["interact", "Interact · takedown · drag"], ["bandage", "Bandage a wound"], ["mark", "Mark target"],
+		["hack", "Disconnect tablet"], ["gadget", "Equipment (hold, release)"], ["gadget_cycle", "Switch equipment"], ["interact", "Interact · takedown · drag"], ["bandage", "Bandage a wound"], ["quicksave", "Quicksave"], ["quickload", "Quickload"],
 	]
 	for r: Array in rows:
 		grid.add_child(Style.label(Settings.glyph(r[0]), 16, Style.INK, Style.semibold))
@@ -263,4 +267,8 @@ func show_debrief(success: bool, rating: String) -> void:
 	_spacer(4)
 	_stats()
 	_spacer(10)
-	_buttons([["REDEPLOY", game.start_mission], ["CHANGE LOADOUT", game.to_menu, false]])
+	var row := [["REDEPLOY", game.start_mission]]
+	if SaveGame.exists() and not success:
+		row.insert(0, ["LOAD QUICKSAVE", game.quickload])
+	row.append(["CHANGE LOADOUT", game.to_menu, false])
+	_buttons(row)

@@ -187,6 +187,30 @@ func start_mission() -> void:
 	_capture(true)
 
 
+func spawn_soldier(r: Dictionary) -> Soldier:
+	return _spawn(r)
+
+
+func set_beacon(on: bool) -> void:
+	_beacon.visible = on
+
+
+func quicksave() -> void:
+	if phase != Phase.PLAY or not player.alive:
+		return
+	if SaveGame.save(self):
+		hud.toast("QUICKSAVED")
+		hud.learn("quicksave")
+
+
+func quickload() -> void:
+	if not SaveGame.exists():
+		hud.toast("NO QUICKSAVE")
+		return
+	SaveGame.load_into(self)
+	hud.toast("QUICKLOADED")
+
+
 func _spawn(r: Dictionary) -> Soldier:
 	var s: Soldier = SOLDIER_SCENE.instantiate()
 	var sq_id: String = r.squad
@@ -285,6 +309,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if phase == Phase.PLAY and tablet_input(event):
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("quicksave"):
+		quicksave()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("quickload") and (phase == Phase.PLAY or phase == Phase.DEAD):
+		quickload()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("pause"):
 		if phase == Phase.PLAY:
 			pause()
@@ -311,6 +343,7 @@ func _physics_process(dt: float) -> void:
 	if _light_t <= 0.0:
 		_light_t = 0.25
 		player_light = facility.light_level(player.global_position, _flashlights())
+		_tick_spotting()
 	player.tick(sdt)
 	for s in soldiers:
 		s.tick(sdt)
@@ -1209,34 +1242,31 @@ func useless_rounds_near() -> Pickup:
 	return null
 
 
-func mark_target() -> void:
-	var o := player.eye_pos()
-	var d := player.view_dir()
-	var wall := ray(o, o + d * 150.0)
-	var max_t := 150.0 if wall.is_empty() else o.distance_to(wall.position)
-	var best: Soldier = null
-	var ba := 0.04
+## Guards come onto your tracker when you actually see them: in front of you, in the open,
+## and either lit or close enough to make out.
+func _tick_spotting() -> void:
+	var cam := player.camera
+	var eye := player.eye_pos()
+	var fwd := player.view_dir()
+	var half := deg_to_rad(cam.fov * 0.5 * 1.25)
 	for s in soldiers:
-		if not s.alive or s.tagged:
+		if not s.alive:
 			continue
-		var hp := s.head_pos()
-		var to := hp - o
-		if to.length() > 150.0:
+		var head := s.head_pos()
+		var to := head - eye
+		var dist := to.length()
+		if dist > 70.0 or to.normalized().angle_to(fwd) > half:
 			continue
-		var hit := false
-		for z: Array in s.zones():
-			var t := Ballistics.ray_sphere(o, d, z[1], z[2])
-			if t >= 0.0 and t < max_t:
-				hit = true
-		var a := to.normalized().angle_to(d)
-		if hit or (a < ba and los(o, hp)):
-			ba = a
-			best = s
-	if best:
-		best.tagged = true
-		best.tag_seen = best.global_position
-		best.tag_seen_t = time
-		Sfx.play("tag")
+		var chest := s.global_position + Vector3.UP * 1.2
+		if not (los(eye, head) or los(eye, chest)) or smoke_blocks(eye, head):
+			continue
+		var bright := s.model.flashlight.visible or dist < 18.0 or facility.light_level(s.global_position, []) > 0.45
+		if not bright:
+			continue
+		s.tag_seen = s.global_position
+		s.tag_seen_t = time
+		if not s.tagged:
+			s.tagged = true
 
 
 func on_soldier_killed(s: Soldier, headshot: bool, takedown: bool) -> void:

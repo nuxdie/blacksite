@@ -872,6 +872,39 @@ func die(dir: Vector3, headshot: bool, takedown: bool) -> void:
 	game.on_soldier_killed(self, headshot, takedown)
 
 
+## Quickload: put this guard back as saved, without any of the side effects of dying again.
+func load_state(d: Dictionary) -> void:
+	global_position = d.pos
+	yaw = d.yaw
+	hp = d.hp
+	aware = d.aware
+	patrol_i = d.patrol_i
+	corpse_found = d.corpse_found
+	accounted = d.accounted
+	tagged = d.tagged
+	tag_seen = d.tag_seen
+	mag = d.mag
+	limp = d.limp
+	carries_badge = d.badge
+	model.rotation.y = yaw
+	if not d.alive:
+		alive = false
+		hp = 0.0
+		fall_side = d.fall_side
+		death_t = 1.0
+		collision_layer = 0
+		collision_mask = Layers.WORLD
+		for _i in 30:
+			model.animate_death(0.1, 1.0, fall_side)
+		return
+	state = d.state
+	if state == State.COMBAT:
+		squad.report(game.player.global_position, game.time - 2.0)
+		react = 0.5
+	elif state == State.SUSPICIOUS:
+		investigate = global_position + facing() * 3.0
+
+
 func _tick_dead(dt: float) -> void:
 	if game.player.drag_body == self:
 		return

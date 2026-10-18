@@ -109,6 +109,31 @@ func reset() -> void:
 		_led_mat.emission_energy_multiplier = 1.4
 
 
+func save_state() -> Dictionary:
+	return {"looped": looped, "disabled": disabled, "destroyed": destroyed, "locked": locked, "sabotaged": sabotaged,
+		"copy_state": copy_state, "copy_progress": copy_progress, "yaw": _yaw}
+
+
+func load_state(d: Dictionary) -> void:
+	reset()
+	looped = d.looped
+	disabled = d.disabled
+	destroyed = d.destroyed
+	locked = d.locked
+	sabotaged = d.sabotaged
+	copy_state = d.copy_state
+	copy_progress = d.copy_progress
+	_yaw = d.yaw
+	if disabled or destroyed:
+		_stand_down(true)
+	if destroyed and head:
+		head.visible = false
+	if kind == Kind.BREAKER and sabotaged:
+		_led_mat.emission = Color("ff4a3a")
+	if _drive:
+		_drive.visible = copy_state == "copying" or copy_state == "done"
+
+
 # ------------------------------------------------------------------ models
 
 func _box(parent: Node3D, size: Vector3, mat: Material, pos: Vector3, rot := Vector3.ZERO) -> MeshInstance3D:

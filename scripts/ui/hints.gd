@@ -19,7 +19,7 @@ var defs: Array[Dictionary] = [
 	{"id": "crouch", "keys": ["crouch"], "text": "Crouch — slower, quieter, harder to spot", "trigger": "noticed_or_late"},
 	{"id": "awareness", "keys": [], "text": "Arcs around your sights show who is noticing you", "trigger": "noticed", "info": true},
 	{"id": "aim", "keys": ["aim"], "text": "Aim down sights", "trigger": "enemy_visible"},
-	{"id": "mark", "keys": ["mark"], "text": "Mark a target — you keep their last seen position", "trigger": "calm_enemy_visible"},
+	{"id": "tracked", "keys": [], "text": "Guards you've seen stay tracked: a hollow marker shows where you last saw them", "trigger": "tracked_hidden", "info": true},
 	{"id": "lights", "keys": [], "text": "You're lit up. Lamps can be shot out", "trigger": "lit_near_guards", "info": true},
 	{"id": "cameras", "keys": [], "text": "Cameras are wired to a security network — get to an access point to deal with them", "trigger": "camera_in_view", "info": true},
 	{"id": "network", "keys": [], "text": "Junction boxes, the server cabinet and the booth terminal all reach the camera network", "trigger": "access_near", "info": true},
@@ -38,6 +38,7 @@ var defs: Array[Dictionary] = [
 	{"id": "caution", "keys": [], "text": "The site is on caution now: sharper eyes, flashlights on. It won't calm down tonight", "trigger": "caution", "info": true},
 	{"id": "radio_call", "keys": [], "text": "A guard is calling you in. Drop them before the call goes through", "trigger": "radio_call", "info": true},
 	{"id": "alarm", "keys": [], "text": "Alarm raised — a reaction force is on its way. Kill a guard before they radio it in and it never happens", "trigger": "alarm", "info": true},
+	{"id": "quicksave", "keys": ["quicksave"], "text": "Quicksave while it's quiet", "trigger": "quiet_spot"},
 	{"id": "penetrated", "keys": [], "text": "Thin walls don't stop rifle rounds — get behind concrete or steel", "trigger": "penetrated", "info": true},
 ]
 
@@ -113,6 +114,10 @@ func _condition(trigger: String) -> bool:
 			return _events.has("kill") and not game.detected
 		"long_bursts":
 			return p.weapons.auto_bursts >= 3 and p.weapons.current().modes.size() > 1
+		"tracked_hidden":
+			return game.soldiers.any(func(s: Soldier) -> bool: return s.alive and s.tagged and game.time - s.tag_seen_t > 1.5 and game.time - s.tag_seen_t < 10.0)
+		"quiet_spot":
+			return game.time > 35.0 and not game.soldiers.any(func(s: Soldier) -> bool: return s.alive and s.state != Soldier.State.CALM)
 		"checkin", "caution":
 			return _events.has(trigger)
 		"alarm":

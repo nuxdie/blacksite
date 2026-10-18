@@ -386,6 +386,7 @@ func _autotest() -> void:
 	hk["camera_shot_out"] = shot_cam.destroyed
 	r["security"] = hk
 	r["consequences"] = await _consequences()
+	r["quicksave"] = await _quicksave()
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -414,6 +415,33 @@ func _autotest() -> void:
 	game.god_mode = true
 	r["ms"] = Time.get_ticks_msec() - t0
 	print("AUTOTEST ", JSON.stringify(r))
+
+
+## Save the night mid-way, change everything, load it back.
+func _quicksave() -> Dictionary:
+	var c := {}
+	await _fresh("carbine")
+	var victim := _find("wh", 26.0)
+	victim.die(Vector3.FORWARD, false, true)
+	game.player.global_position = Vector3(-20, 0, -26)
+	game.player.hp = 61.0
+	game.player.weapons.mag[0] = 7
+	game.hq.caution("test")
+	_device("COMMS RELAY").on_used(game)
+	await _frames(10)
+	var pickups_before := game.facility.pickups.size()
+	c["saved"] = SaveGame.save(game)
+	await _fresh("carbine")
+	c["loaded"] = SaveGame.load_into(game)
+	await _frames(5)
+	c["guard_dead"] = not _find("wh", 26.0).alive if _find("wh", 26.0) else not game.soldiers[10].alive
+	c["player_pos"] = game.player.global_position.distance_to(Vector3(-20, 0, -26)) < 0.5
+	c["hp"] = roundi(game.player.hp)
+	c["mag"] = game.player.weapons.mag[0]
+	c["caution"] = Command.Level.keys()[game.hq.level]
+	c["comms_down"] = game.comms_down
+	c["pickups"] = [pickups_before, game.facility.pickups.size()]
+	return c
 
 
 ## Radio checks, alarms, comms and wounds.
