@@ -87,6 +87,7 @@ var use_progress: Dictionary = {}
 var _repairs: Array[Dictionary] = []
 var _body_scan_t := 0.0
 var hq := Command.new(self)
+var console := NetConsole.new()
 
 
 func _ready() -> void:
@@ -187,6 +188,8 @@ func start_mission() -> void:
 	use_progress.clear()
 	_repairs.clear()
 	hq.reset()
+	console.game = self
+	console.close()
 	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
 	player.spawn(facility.player_start, facility.player_start_yaw)
 	player.active = true
@@ -960,6 +963,8 @@ func open_tablet(access: Device, exploited: bool) -> void:
 	tablet_cam = 0
 	player.in_tablet = true
 	stats.hacks += 1
+	console.game = self
+	console.open(access, has_badge)
 	if exploited:
 		add_trace(45.0, "Unauthorised login")
 	hud.learn("network")
@@ -971,6 +976,7 @@ func close_tablet() -> void:
 		return
 	tablet_access = null
 	player.in_tablet = false
+	console.close()
 	Sfx.play("ui_move", -4.0, 0.0)
 
 
@@ -979,39 +985,38 @@ func _tick_tablet() -> void:
 		close_tablet()
 
 
+## While connected, the terminal eats keyboard input: typed text goes to the command line.
 func tablet_input(event: InputEvent) -> bool:
 	if not tablet_access:
 		return false
-	var cams := cameras()
-	if event.is_action_pressed("lean_left"):
-		tablet_cam = (tablet_cam - 1 + cams.size()) % cams.size()
-	elif event.is_action_pressed("lean_right"):
-		tablet_cam = (tablet_cam + 1) % cams.size()
-	elif event.is_action_pressed("interact"):
-		var c := cams[tablet_cam]
-		if c.camera_live():
-			c.loop_feed()
-			add_trace(12.0, "Feed buffer anomaly")
-			hud.toast("%s  ·  FEED LOOPED %ds" % [c.label, int(Device.LOOP_TIME)])
-	elif event.is_action_pressed("gadget_cycle"):
-		var c := cams[tablet_cam]
-		if not c.disabled and not c.destroyed:
-			c.disable()
-			add_trace(25.0, "Camera offline")
-			_schedule_repair(c, 20.0)
-			hud.toast(c.label + "  ·  DISABLED  ·  SECURITY WILL NOTICE")
-	elif event.is_action_pressed("reload") and tablet_admin:
-		for c in cams:
-			if not c.destroyed:
-				c.disable()
-		add_trace(40.0, "Camera system shutdown")
-		_schedule_repair(_terminal(), 15.0)
-		hud.banner("CAMERAS OFFLINE")
-	elif event.is_action_pressed("hack") or event.is_action_pressed("pause"):
-		close_tablet()
-	else:
-		return event is InputEventKey or event is InputEventMouseButton
-	Sfx.play("ui_move", -6.0, 0.0)
+	if event is InputEventMouseButton:
+		return true
+	if not (event is InputEventKey) or not event.pressed:
+		return event is InputEventKey
+	var k := event as InputEventKey
+	match k.keycode:
+		KEY_ENTER, KEY_KP_ENTER:
+			console.submit()
+		KEY_BACKSPACE:
+			console.backspace()
+		KEY_DELETE:
+			console.delete()
+		KEY_TAB:
+			console.autocomplete()
+		KEY_LEFT:
+			console.move_cursor(-1)
+		KEY_RIGHT:
+			console.move_cursor(1)
+		KEY_UP:
+			console.recall(-1)
+		KEY_DOWN:
+			console.recall(1)
+		KEY_ESCAPE:
+			close_tablet()
+		_:
+			if k.unicode >= 32:
+				console.type_text(String.chr(k.unicode))
+	Sfx.play("ui_move", -16.0, 0.0)
 	return true
 
 

@@ -68,6 +68,13 @@ func _device(label: String) -> Device:
 	return null
 
 
+## Run one console command, as if typed and entered.
+func _console(cmd: String) -> void:
+	game.console.input = cmd
+	game.console.submit()
+	await _frames(2)
+
+
 func _tap(action: String) -> void:
 	var ev := InputEventAction.new()
 	ev.action = action
@@ -271,17 +278,18 @@ func _autotest() -> void:
 	await _frames(3)
 	hk["tablet_open"] = game.tablet_access == junction
 	hk["trace_after_bypass"] = roundi(game.trace)
-	_tap("interact")
-	await _frames(2)
+	await _console("loop 1")
 	hk["cam1_looped"] = cams[0].looped > 0.0
-	_tap("lean_right")
-	_tap("lean_right")
-	_tap("gadget_cycle")
-	await _frames(2)
+	await _console("kill 3")
 	hk["cam3_disabled"] = cams[2].disabled
-	_tap("lean_right")
-	_tap("gadget_cycle")
-	await _frames(2)
+	await _console("unlock server")
+	hk["console_unlock"] = not game.facility.doors[0].secured()
+	await _console("relay off")
+	hk["console_relay"] = game.comms_down
+	# drive trace to the lockout
+	for _n2 in 6:
+		await _console("kill %d" % (randi() % 5 + 1))
+		await _console("loop %d" % (randi() % 5 + 1))
 	hk["intrusion_locked"] = junction.locked > 0.0
 	hk["tablet_closed"] = game.tablet_access == null
 	# leave before they come to look
@@ -310,10 +318,9 @@ func _autotest() -> void:
 	await _frames(3)
 	hk["admin"] = game.tablet_admin
 	hk["trace_with_badge"] = roundi(game.trace)
-	_tap("reload")
-	await _frames(2)
-	hk["all_cameras_down"] = cams.all(func(d: Device) -> bool: return d.disabled)
-	_tap("hack")
+	await _console("blackout")
+	hk["all_cameras_down"] = cams.all(func(d: Device) -> bool: return d.disabled or d.destroyed)
+	game.close_tablet()
 	# relay sabotage cuts their radio
 	await _fresh("carbine")
 	var relay := _device("COMMS RELAY")
@@ -868,7 +875,13 @@ func _shots(dir: String) -> void:
 	await get_tree().create_timer(0.1).timeout
 	_snap(dir + "/terminal.png")
 	term.on_used(game)
-	await get_tree().create_timer(0.8).timeout
+	await get_tree().create_timer(0.3).timeout
+	for cmd: String in ["ls", "loop 2", "unlock server", "relay off"]:
+		game.console.input = cmd
+		game.console.submit()
+		await get_tree().create_timer(0.15).timeout
+	game.console.input = "pow"
+	await get_tree().create_timer(0.2).timeout
 	_snap(dir + "/tablet.png")
 	game.close_tablet()
 	await _sight_shots(dir)

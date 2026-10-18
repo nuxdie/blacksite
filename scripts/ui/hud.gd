@@ -160,7 +160,8 @@ func refresh(dt: float) -> void:
 	_feed_rect.visible = open
 	_feed_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if open else SubViewport.UPDATE_DISABLED
 	if open:
-		var cam := game.cameras()[game.tablet_cam]
+		var ci: int = clampi(game.console.watch_cam, 0, game.cameras().size() - 1)
+		var cam := game.cameras()[ci]
 		_feed_cam.global_transform = cam.feed_transform()
 		var sig := 0.0 if cam.destroyed or cam.disabled else 1.0
 		(_feed_rect.material as ShaderMaterial).set_shader_parameter("signal", sig)
@@ -472,76 +473,89 @@ func _laptop() -> Device:
 
 
 ## The security tablet: camera list, the live feed, and what each action will cost you.
+## The network terminal: a typed console on the left, the watched camera feed top-right, trace
+## below it, and a live palette of what you can type. Self-documenting; nothing to memorise.
 func _draw_tablet(size: Vector2) -> void:
+	var con := game.console
 	var cams := game.cameras()
-	var sel := cams[game.tablet_cam]
-	var w := minf(980.0, size.x - 80.0)
-	var h := w * 0.5
-	var r := Rect2((size.x - w) * 0.5, (size.y - h) * 0.5 - 70.0, w, h)
-	# the panel frames the feed; the feed itself is a separate node underneath this overlay
-	var outer := r.grow(14)
-	var fr := Rect2(r.position.x + 226.0, r.position.y, w - 226.0, h - 46.0)
-	var bg := Color(0.02, 0.03, 0.05, 0.92)
-	_overlay.draw_rect(Rect2(outer.position, Vector2(fr.position.x - outer.position.x, outer.size.y)), bg)
-	_overlay.draw_rect(Rect2(fr.end.x, outer.position.y, outer.end.x - fr.end.x, outer.size.y), bg)
-	_overlay.draw_rect(Rect2(fr.position.x, outer.position.y, fr.size.x, fr.position.y - outer.position.y), bg)
-	_overlay.draw_rect(Rect2(fr.position.x, fr.end.y, fr.size.x, outer.end.y - fr.end.y), bg)
-	_overlay.draw_rect(outer, Color(1, 1, 1, 0.12), false, 1.0)
-	var header := "SECURITY NETWORK  ·  %s  ·  %s" % [game.tablet_access.label, "ADMIN" if game.tablet_admin else "EXPLOIT SESSION"]
-	_text(r.position + Vector2(0, -22), header, 14, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
-	var list_w := 210.0
-	for i in cams.size():
-		var cam := cams[i]
-		var row := Rect2(r.position.x, r.position.y + i * 42.0, list_w, 36)
-		var active := i == game.tablet_cam
-		if active:
-			_overlay.draw_rect(row, Color(1, 0.72, 0.29, 0.1))
-			_overlay.draw_rect(Rect2(row.position, Vector2(2, row.size.y)), Style.AMBER)
-		_text(row.position + Vector2(12, 23), cam.label, 15, Style.INK if active else Style.DIM)
-		var st := "LIVE"
-		var col := Style.INK
-		if cam.destroyed:
-			st = "NO SIGNAL"
-			col = Style.RED
-		elif cam.disabled:
-			st = "OFFLINE"
-			col = Style.RED
-		elif cam.looped > 0.0:
-			st = "LOOP %ds" % ceili(cam.looped)
-			col = Style.GREEN
-		elif cam.alarm:
-			st = "ALARM"
-			col = Style.RED
-		_text(row.position + Vector2(list_w - 10, 23), st, 12, col, HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
-	var feed := Rect2(r.position.x + list_w + 16, r.position.y, w - list_w - 16, h - 46)
+	var w := minf(1060.0, size.x - 70.0)
+	var h := w * 0.52
+	var r := Rect2((size.x - w) * 0.5, (size.y - h) * 0.5 - 40.0, w, h)
+	_overlay.draw_rect(r.grow(14), Style.BG)
+	_overlay.draw_rect(r.grow(14), Color(0.3, 0.9, 0.6, 0.18), false, 1.0)
+	var feed_w := 376.0
+	var con_w := w - feed_w - 28.0
+	var header := "SECURITY NETWORK  //  %s  //  %s" % [NetConsole._slug(game.tablet_access.label), "ADMIN" if game.tablet_admin else "GUEST"]
+	_text(r.position + Vector2(0, -20), header, 14, Style.GREEN, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+	# console log
+	var mono := _f_small
+	var line_h := 17.0
+	var pal_h := 86.0
+	var log_bottom := r.position.y + h - pal_h - 34.0
+	var shown: Array = con.log.slice(maxi(0, con.log.size() - int((log_bottom - r.position.y - 8.0) / line_h)))
+	var ly := r.position.y + 10.0
+	for e: Dictionary in shown:
+		_text(Vector2(r.position.x + 4, ly + 12), e.text, 13, _tag_color(e.tag), HORIZONTAL_ALIGNMENT_LEFT, mono)
+		ly += line_h
+	# input line with cursor
+	var iy := log_bottom + 6.0
+	_overlay.draw_line(Vector2(r.position.x, iy), Vector2(r.position.x + con_w, iy), Color(1, 1, 1, 0.1), 1.0)
+	var prompt := NetConsole.PROMPT + ":~$ "
+	_text(Vector2(r.position.x + 4, iy + 20), prompt, 13, Style.GREEN, HORIZONTAL_ALIGNMENT_LEFT, mono)
+	var pw := mono.get_string_size(prompt, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+	_text(Vector2(r.position.x + 4 + pw, iy + 20), con.input, 13, Style.INK, HORIZONTAL_ALIGNMENT_LEFT, mono)
+	if fmod(game.time, 1.0) < 0.5:
+		var cx := r.position.x + 4 + pw + mono.get_string_size(con.input.substr(0, con.cursor), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		_overlay.draw_rect(Rect2(cx, iy + 7, 7, 15), Color(Style.GREEN, 0.8))
+	# palette of valid next tokens
+	var sugg := con.suggestions()
+	var py := iy + 34.0
+	_text(Vector2(r.position.x + 4, py + 10), "AVAILABLE", 11, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
+	var sx := r.position.x + 4
+	var swy := py + 28.0
+	for item: Dictionary in sugg.slice(0, 10):
+		var label2: String = item.text + ("  " + item.help if item.help != "" else "")
+		var tw := mono.get_string_size(label2, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 14.0
+		if sx + tw > r.position.x + con_w:
+			sx = r.position.x + 4
+			swy += 20.0
+		var box := Rect2(sx, swy - 13, tw - 6, 18)
+		_overlay.draw_rect(box, Color(1, 1, 1, 0.05))
+		_text(Vector2(sx + 5, swy), item.text, 12, Style.AMBER if item.admin else Style.INK, HORIZONTAL_ALIGNMENT_LEFT, mono)
+		if item.help != "":
+			var ox := mono.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 10.0
+			_text(Vector2(sx + 5 + ox, swy), item.help, 12, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
+		sx += tw
+	# feed panel on the right
+	var fx := r.position.x + con_w + 20.0
+	var feed := Rect2(fx, r.position.y, feed_w, feed_w * 0.56)
 	_feed_rect.position = feed.position
 	_feed_rect.size = feed.size
 	_overlay.draw_rect(feed, Color(1, 1, 1, 0.15), false, 1.0)
+	var ci: int = clampi(con.watch_cam, 0, cams.size() - 1)
 	var secs := int(game.time) + 7_380
-	_text(feed.position + Vector2(10, 20), "%s   02:%02d:%02d" % [sel.label, (secs / 60) % 60, secs % 60], 14, Color(1, 1, 1, 0.8), HORIZONTAL_ALIGNMENT_LEFT, _f_small)
+	_text(feed.position + Vector2(8, 16), "%s  02:%02d:%02d" % [cams[ci].label, (secs / 60) % 60, secs % 60], 12, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_LEFT, mono)
 	if fmod(game.time, 1.0) < 0.5:
-		_overlay.draw_circle(feed.position + Vector2(feed.size.x - 16, 15), 4.0, Style.RED)
-	# trace
-	var ty := r.end.y - 30.0
-	_text(Vector2(r.position.x, ty + 4), "TRACE", 12, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, _f_small)
-	var bar := Rect2(r.position.x + 60, ty - 4, w - 60, 4)
-	_overlay.draw_rect(bar, Color(1, 1, 1, 0.12))
-	_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * clampf(game.trace / 100.0, 0.0, 1.0), 4)), Style.RED if game.trace > 70.0 else Style.AMBER)
+		_overlay.draw_circle(feed.position + Vector2(feed.size.x - 14, 13), 4.0, Style.RED)
+	# trace bar under the feed
+	var ty := feed.end.y + 22.0
+	_text(Vector2(fx, ty - 6), "TRACE", 12, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
+	var bar := Rect2(fx + 54, ty - 14, feed_w - 54, 6)
+	_overlay.draw_rect(bar, Color(1, 1, 1, 0.1))
+	_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * clampf(game.trace / 100.0, 0.0, 1.0), 6)), Style.RED if game.trace > 70.0 else Style.AMBER)
 	if _trace_t > 0.0:
-		_text(Vector2(r.end.x, ty + 18), _trace_reason, 12, Color(Style.RED, minf(1.0, _trace_t)), HORIZONTAL_ALIGNMENT_RIGHT, _f_small)
-	# actions, with what they cost
-	var rows := [[["lean_left", "lean_right"], "Camera"]]
-	if sel.camera_live():
-		rows.append([["interact"], "Loop feed  +12"])
-	if not sel.disabled and not sel.destroyed:
-		rows.append([["gadget_cycle"], "Disable  +25  ·  they'll send someone"])
-	if game.tablet_admin:
-		rows.append([["reload"], "Shut down all  +40"])
-	rows.append([["hack"], "Disconnect"])
-	var x := r.position.x
-	var py := r.end.y + 40.0
-	for row: Array in rows:
-		x += _prompt_row(Vector2(x, py), row[0], row[1], 1.0) + 26.0
+		_text(Vector2(fx, ty + 16), _trace_reason, 12, Color(Style.RED, minf(1.0, _trace_t)), HORIZONTAL_ALIGNMENT_LEFT, mono)
+	_text(Vector2(fx, feed.end.y + 48.0), "ESC disconnect  ·  Tab complete  ·  ↑ history", 12, Style.DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
+
+
+func _tag_color(tag: String) -> Color:
+	match tag:
+		"green": return Style.GREEN
+		"amber": return Style.AMBER
+		"red": return Style.RED
+		"dim": return Style.DIM
+		"input": return Color(0.75, 0.85, 1.0)
+	return Style.INK
 
 
 func _draw_arcs(c: Vector2) -> void:
