@@ -85,7 +85,7 @@ func update(dt: float) -> void:
 		if _condition(d.trigger):
 			current = d
 			shown_t = 0.0
-			Sfx.play("hint", -10.0, 0.0)
+			Sfx.ui("hint", -10.0)
 			return
 
 

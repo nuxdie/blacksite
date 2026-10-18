@@ -81,6 +81,8 @@ var vault_ok := false
 var trauma := 0.0
 var kick := 0.0
 var heart_t := 0.0
+var _bleed_snd := 0.0
+var _bandage_snd := 0.0
 var step_acc := 0.0
 var mouse_delta := Vector2.ZERO
 var low_cover_ahead := false
@@ -702,6 +704,7 @@ func take_damage(amount: float, from: Vector3, through_wall := false, zone := "b
 	bleed = minf(2.0, bleed + amount * 0.008)
 	if zone == "legs" and not leg_wound:
 		leg_wound = true
+		Sfx.play("hurt_breath", -4.0)
 		game.hud.hint_event("leg_wound")
 	game.hud.on_damage(amount, from)
 	if through_wall:
@@ -723,6 +726,10 @@ func _die() -> void:
 func _tick_wounds(dt: float) -> void:
 	if bandage_t >= 0.0:
 		bandage_t += dt
+		_bandage_snd -= dt
+		if _bandage_snd <= 0.0:
+			_bandage_snd = 0.55
+			Sfx.play("cloth", -8.0)
 		if bandage_t >= BANDAGE_TIME:
 			bandage_t = -1.0
 			bleed = 0.0
@@ -732,6 +739,10 @@ func _tick_wounds(dt: float) -> void:
 		hp -= bleed * dt
 		bleed = maxf(0.0, bleed - dt * 0.004)
 		game.hud.hint_event("bleeding")
+		_bleed_snd -= dt
+		if bandage_t < 0.0 and _bleed_snd <= 0.0:
+			_bleed_snd = 2.2
+			Sfx.play("bleed", -10.0)
 		if hp <= 0.0:
 			_die()
 
@@ -756,6 +767,7 @@ func treat() -> void:
 	bleed = 0.0
 	leg_wound = false
 	bandages = maxi(bandages, 2)
+	Sfx.play("medkit", -4.0)
 
 
 func needs_treatment() -> bool:
@@ -791,4 +803,4 @@ func update_camera(dt: float) -> void:
 		fov = lerpf(FOV, w.ads_fov, ads) + (4.0 if sprinting else 0.0)
 	camera.fov = fov if (w.scoped and ads > 0.85) else lerpf(camera.fov, fov, minf(1.0, dt * 14.0))
 	viewmodel.animate(dt, self, w, weapons)
-	Sfx.set_muffle(supp * 0.35 + minf(0.85, game.hud.flash * 0.7))
+	Sfx.set_muffle(supp * 0.35 + minf(0.85, game.hud.flash * 0.7) + (0.0 if alive else 0.75))

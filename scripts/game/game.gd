@@ -32,16 +32,9 @@ const REINFORCEMENTS := [
 	{"squad": "qrf", "type": "rifleman", "pos": Vector3(42, 0, -32)},
 	{"squad": "qrf", "type": "rifleman", "pos": Vector3(-2, 0, -33)},
 ]
-const LINES := {
-	"contact": ["Contact!", "Got eyes on him!", "There he is!"], "heard": ["Shots fired!", "Gunfire — stay sharp!"],
-	"radio": ["Copy, moving!", "On my way!"], "flank": ["Flanking!", "Moving to flank!", "I'm going around!"],
-	"reload": ["Reloading!", "Changing mag!"], "nade": ["Frag out!", "Grenade out!"], "nade_warn": ["Grenade!", "Get clear!"],
-	"mandown": ["Man down!", "We lost one!"], "lost": ["Lost visual.", "Where'd he go?"], "search": ["Moving up.", "I'll check it."],
-	"hit": ["I'm hit!", "Taking fire!"], "supp": ["Suppressing!", "Keep his head down!"], "huh": ["Huh?", "Hold on...", "What was that?"],
-	"calm": ["Must be nothing.", "...Nothing."], "push": ["Pushing!", "Moving in!"], "body": ["Body here!", "Someone's down!"],
-	"blind": ["I can't see!", "Flash — I'm blind!"], "lights": ["Lights just went out...", "Who killed the lights?"],
-	"noise": ["Hear that?", "Something over there..."], "jammed": ["Radio check — anyone?", "Comms are down!", "I've got nothing but static."], "power": ["Power's out.", "Lights just died...", "Who tripped the breaker?"], "repair": ["I'll go take a look.", "On it — checking the box."], "pulled": ["Someone's been at the laptop!", "There's a drive in here!"], "smoke": ["Smoke! Watch the smoke!", "He's in the smoke!"],
-}
+## Lines guards shout rather than send over the radio; everything else is squad net traffic.
+const SHOUTED := ["contact", "heard", "nade", "nade_warn", "hit", "blind", "huh", "calm", "lights", "noise", "power", "body", "pulled", "smoke", "cover", "jammed"]
+const INTERIORS := ["WAREHOUSE", "MEZZANINE", "DATA OFFICE", "OFFICE", "SERVER ROOM", "ARMOURY", "GATEHOUSE"]
 
 var phase := Phase.LOADING
 var facility: Facility
@@ -91,6 +84,8 @@ var console := NetConsole.new()
 ## Multitool action in progress: {kind, door|soldier, time, label}, and its 0..1 progress.
 var tool_target: Dictionary = {}
 var tool_progress := 0.0
+var _spotted_t := -9.0
+var _trace_warn_t := 0.0
 
 
 func _ready() -> void:
@@ -196,6 +191,10 @@ func start_mission() -> void:
 	tool_target = {}
 	tool_progress = 0.0
 	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
+	_spotted_t = -9.0
+	Sfx.set_muffle(0.0)
+	for id: String in ["tool", "use", "copy", "term"]:
+		Sfx.stop_loop(id, 400.0)
 	player.spawn(facility.player_start, facility.player_start_yaw)
 	player.active = true
 	_beacon.visible = false
@@ -218,7 +217,8 @@ func quicksave() -> void:
 	if phase != Phase.PLAY or not player.alive:
 		return
 	if SaveGame.save(self):
-		hud.toast("QUICKSAVED")
+		Sfx.ui("save", -6.0)
+		hud.toast("QUICKSAVED", false)
 		hud.learn("quicksave")
 
 
@@ -227,7 +227,8 @@ func quickload() -> void:
 		hud.toast("NO QUICKSAVE")
 		return
 	SaveGame.load_into(self)
-	hud.toast("QUICKLOADED")
+	Sfx.ui("load", -6.0)
+	hud.toast("QUICKLOADED", false)
 
 
 func _spawn(r: Dictionary) -> Soldier:
@@ -244,6 +245,7 @@ func _spawn(r: Dictionary) -> Soldier:
 	var sq_n := (squads[sq_id] as Squad).members.size()
 	s.callsign = "%s %d" % [{"yard": "Gate", "office": "Office", "wh": "Warehouse", "qrf": "Reaction"}.get(sq_id, "Post"), sq_n]
 	s.call_order = soldiers.size()
+	s.voice = Lines.guard_voice(s.call_order)
 	add_child(s)
 	soldiers.append(s)
 	return s
@@ -256,6 +258,7 @@ func pause() -> void:
 	player.active = false
 	weapons_release()
 	get_tree().paused = false
+	Sfx.ui("pause", -6.0)
 	menu.show_pause()
 	hud.visible = false
 	_capture(false)
@@ -266,6 +269,7 @@ func resume() -> void:
 		return
 	phase = Phase.PLAY
 	player.active = true
+	Sfx.ui("pause", -8.0)
 	menu.hide_all()
 	hud.visible = true
 	_capture(true)
@@ -286,6 +290,9 @@ func to_menu() -> void:
 
 func on_player_died() -> void:
 	player.active = false
+	Sfx.play("death", -2.0)
+	for id: String in ["tool", "use", "term"]:
+		Sfx.stop_loop(id)
 	get_tree().create_timer(2.2).timeout.connect(func() -> void:
 		if phase != Phase.PLAY:
 			return
@@ -298,6 +305,7 @@ func on_player_died() -> void:
 func _complete() -> void:
 	phase = Phase.DONE
 	player.active = false
+	Sfx.ui("extracted", -4.0)
 	if Settings.best_time < 0.0 or time < Settings.best_time:
 		Settings.best_time = time
 		Settings.save_settings()
@@ -378,6 +386,7 @@ func _physics_process(dt: float) -> void:
 		dr.tick(sdt, self)
 	hq.tick(sdt)
 	_tick_mission(sdt)
+	_tick_audio_state(sdt)
 
 
 func _process(dt: float) -> void:
@@ -416,7 +425,9 @@ func _tick_mission(dt: float) -> void:
 		reinforce_t -= dt
 		if reinforce_t <= 0.0:
 			Sfx.play_at("truck", Vector3(6, 1, 33))
-			hud.subtitle("HQ", (Command.LINES.qrf as Array).pick_random())
+			for k in 3:
+				get_tree().create_timer(2.4 + k * 0.45).timeout.connect(func() -> void: Sfx.play_at("truck_door", Vector3(6 + k, 1, 33), 0.0))
+			hq.announce("qrf")
 			for r: Dictionary in REINFORCEMENTS:
 				var s := _spawn(r)
 				s.state = Soldier.State.COMBAT
@@ -483,12 +494,151 @@ func say(s: Soldier, kind: String, force := false) -> void:
 		return
 	if not force and (s.voice_t > 0.0 or time - _last_line_t < 0.9):
 		return
+	var texts := Lines.guard(kind)
+	if texts.is_empty():
+		return
 	s.voice_t = 4.0
 	_last_line_t = time
 	if player.global_position.distance_to(s.global_position) > 45.0 and kind != "nade":
 		return
-	Sfx.play_at("radio", s.eye(), -4.0)
-	hud.subtitle(s.profile.display_name, (LINES[kind] as Array).pick_random())
+	var i := randi() % texts.size()
+	_line(s, kind, i, "", texts[i], not comms_down and not SHOUTED.has(kind))
+
+
+## A guard answering the radio check, in the voice that callsign always has.
+func checkin(s: Soldier, i: int) -> void:
+	var texts := Lines.guard("check_in")
+	if texts.is_empty():
+		return
+	_line(s, "check_in", i, Lines.slug(s.callsign), texts[i] % s.callsign, not comms_down)
+
+
+## A guard's line: heard in person when they are close; otherwise, if it went over the net, through
+## the nearest radio within earshot (a guard's, or a body's).
+func _line(s: Soldier, kind: String, i: int, slug: String, text: String, over_radio: bool) -> void:
+	var d := player.global_position.distance_to(s.global_position)
+	var path := ""
+	var radio := false
+	var pos := s.eye()
+	if d < 22.0 or not over_radio:
+		path = Sfx.voice_path(s.voice, kind, i, slug, false)
+	else:
+		var r := nearest_radio()
+		if r == null:
+			return
+		path = Sfx.voice_path(s.voice, kind, i, slug, true)
+		radio = true
+		pos = radio_pos(r)
+	if path == "":
+		Sfx.play_at("radio", pos, -4.0)
+	s.speaking(Sfx.speak(path, pos, radio, -3.0 if radio else 0.0))
+	s.voice_t = maxf(1.5, Sfx.voice_length(path) + 0.6)
+	hud.subtitle(s.callsign, text, radio)
+
+
+## Any radio within earshot: a guard, or a body still wearing one.
+func nearest_radio() -> Soldier:
+	var best: Soldier = null
+	var bd := 22.0
+	for o in soldiers:
+		var d := o.global_position.distance_to(player.global_position)
+		if d < bd:
+			bd = d
+			best = o
+	return best
+
+
+func radio_pos(r: Soldier) -> Vector3:
+	return r.eye() if r.alive else r.global_position + Vector3.UP * 0.3
+
+
+## HQ and the security desk only reach you through a radio nearby. Priority traffic opens with
+## the two-tone alert. Returns false when nobody near you is carrying a radio.
+func net_say(who: String, voice: String, kind: String, i: int, slug: String, text: String, priority := false) -> bool:
+	var r := nearest_radio()
+	if r == null:
+		return false
+	var pos := radio_pos(r)
+	var path := Sfx.voice_path(voice, kind, i, slug, true)
+	if priority:
+		Sfx.play_at("hq_tone", pos, -8.0, false, 0.0)
+		get_tree().create_timer(0.45).timeout.connect(func() -> void: Sfx.speak(path, pos, true, -3.0))
+	else:
+		Sfx.speak(path, pos, true, -3.0)
+	hud.subtitle(who, text, true)
+	return true
+
+
+## The security desk reports what a camera or drone saw.
+func security_say(kind: String, label: String) -> void:
+	var texts := Lines.security(kind)
+	if texts.is_empty():
+		return
+	var i := randi() % texts.size()
+	net_say("SECURITY", Lines.security_voice(), kind, i, Lines.slug(label), texts[i] % label)
+
+
+## The moment someone confirms you: once, not for every guard in the squad.
+func spotted_cue() -> void:
+	if time - _spotted_t > 2.5:
+		_spotted_t = time
+		Sfx.ui("spotted", -6.0)
+
+
+func lost_cue() -> void:
+	Sfx.ui("lost_you", -8.0)
+
+
+## What the mix should say about the state of the night: tension beds, indoors or out, and the
+## machines that keep running (searchlight motors, the laptop copying, the terminal, trace).
+func _tick_audio_state(dt: float) -> void:
+	var level := 0.0
+	for s in soldiers:
+		if not s.alive:
+			continue
+		if s.state == Soldier.State.COMBAT:
+			level = 2.0
+			break
+		if s.state == Soldier.State.SUSPICIOUS or s.aware > 0.15:
+			level = maxf(level, 1.0)
+	if level < 2.0:
+		for dv in facility.devices:
+			if dv.camera_live() and dv.aware > 0.1:
+				level = maxf(level, 1.0)
+		for dr in facility.drones:
+			if dr.scanning() and dr.aware > 0.1:
+				level = maxf(level, 2.0 if dr.mode == Drone.Mode.TRACK else 1.0)
+	if not player.alive:
+		level = 0.0
+	Sfx.tension(level, dt)
+	Sfx.interior(1.0 if facility.area_name(player.global_position) in INTERIORS else 0.0, dt)
+	for i in facility.searchlights.size():
+		var sl := facility.searchlights[i]
+		if sl.visible:
+			Sfx.loop_at("searchlight%d" % i, "motor", sl.global_position, -12.0, 3.0, 28.0)
+		else:
+			Sfx.stop_loop("searchlight%d" % i)
+	var lap := laptop()
+	if lap and lap.copy_state == "copying":
+		Sfx.loop_at("copy", "copy_loop", lap.global_position + Vector3.UP * 0.1, -10.0, 1.5, 14.0)
+	else:
+		Sfx.stop_loop("copy")
+	if tablet_access:
+		Sfx.loop("term", "term_hum", -14.0)
+		if trace > 70.0:
+			_trace_warn_t -= dt
+			if _trace_warn_t <= 0.0:
+				_trace_warn_t = 1.6
+				Sfx.ui("term_trace", -8.0)
+	else:
+		Sfx.stop_loop("term")
+
+
+func laptop() -> Device:
+	for dv in facility.devices:
+		if dv.kind == Device.Kind.LAPTOP:
+			return dv
+	return null
 
 
 func radio_alert(s: Soldier, delay: float) -> void:
@@ -644,6 +794,7 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 		fx.burst("spark", cam.head.global_position)
 		# a feed that suddenly dies gets noticed in the security office
 		if not comms_down:
+			security_say("cam_lost", cam.label)
 			_dispatch(NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, cam.global_position), "investigate", 1)
 		return
 	if not _shot_hit:
@@ -906,11 +1057,17 @@ func _tick_devices(dt: float) -> void:
 				use_target = null
 				using = false
 				dv.on_used(self)
+	if using and use_target:
+		var key: String = {Device.Kind.VENT: "vent_loop", Device.Kind.RELAY: "relay_loop", Device.Kind.ACCESS: "clone_loop"}.get(use_target.kind, "work_loop")
+		Sfx.loop_at("use", key, use_target.use_point(), -10.0, 1.5, 12.0)
+	else:
+		Sfx.stop_loop("use")
 	if not using:
 		_tick_tool(dt)
 	else:
 		tool_target = {}
 		tool_progress = 0.0
+		Sfx.stop_loop("tool")
 	player.hacking = using or not tool_target.is_empty()
 	if tablet_access:
 		_tick_tablet()
@@ -933,10 +1090,11 @@ func _tick_devices(dt: float) -> void:
 ## A drone just confirmed you: same as a camera alarm, HQ raises the alarm if comms are up.
 func drone_alarm(dr: Drone) -> void:
 	Sfx.play_at("alarm", dr.global_position, 0.0, false)
+	spotted_cue()
 	hud.hint_event("drone_alarm")
 	if comms_down:
 		return
-	hud.subtitle("SECURITY", "%s has eyes on the intruder." % dr.label)
+	security_say("drone", dr.label)
 	_dispatch(player.global_position, "saw")
 	hq.camera_contact(player.global_position)
 
@@ -951,6 +1109,7 @@ func drone_report(_dr: Drone) -> void:
 
 func drone_destroyed(dr: Drone, was_watching: bool) -> void:
 	Sfx.play_at("glass", dr.global_position)
+	Sfx.play_at("drone_down", dr.global_position, 0.0, false)
 	if was_watching and not comms_down:
 		# losing a drone mid-track is a report in itself
 		_dispatch(NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, dr.global_position), "investigate", 1)
@@ -978,7 +1137,7 @@ func open_tablet(access: Device, exploited: bool) -> void:
 	if exploited:
 		add_trace(45.0, "Unauthorised login")
 	hud.learn("network")
-	Sfx.play("ui_select", -4.0, 0.0)
+	Sfx.ui("term_login", -6.0)
 
 
 func close_tablet() -> void:
@@ -987,7 +1146,7 @@ func close_tablet() -> void:
 	tablet_access = null
 	player.in_tablet = false
 	console.close()
-	Sfx.play("ui_move", -4.0, 0.0)
+	Sfx.ui("ui_move", -6.0)
 
 
 func _tick_tablet() -> void:
@@ -1026,7 +1185,7 @@ func tablet_input(event: InputEvent) -> bool:
 		_:
 			if k.unicode >= 32:
 				console.type_text(String.chr(k.unicode))
-	Sfx.play("ui_move", -16.0, 0.0)
+	Sfx.ui("key", -12.0)
 	return true
 
 
@@ -1047,7 +1206,8 @@ func add_trace(amount: float, reason: String) -> void:
 		close_tablet()
 		if at:
 			at.locked = 60.0
-			hud.banner("INTRUSION DETECTED")
+			Sfx.ui("term_kick", -4.0)
+			hud.banner("INTRUSION DETECTED", false)
 			_dispatch(at.use_point(), "investigate", 2)
 
 
@@ -1063,12 +1223,14 @@ func restore_cameras() -> void:
 func jam_comms(relay: Device) -> void:
 	comms_down = true
 	_pending_radio = _pending_radio.filter(func(r: Dictionary) -> bool: return r.has("release"))
+	Sfx.play_at("comms_cut", relay.global_position + Vector3.UP * 0.7, 0.0)
 	hud.banner("COMMS DOWN")
 	_schedule_repair(relay, 30.0)
 
 
-func comms_restored() -> void:
+func comms_restored(relay: Device) -> void:
 	comms_down = false
+	Sfx.play_at("comms_up", relay.global_position + Vector3.UP * 0.7, -2.0)
 	hud.toast("ENEMY COMMS RESTORED")
 
 
@@ -1082,10 +1244,16 @@ func set_zone_power(breaker: Device, on: bool) -> void:
 	for d in facility.doors:
 		if d.zone == breaker.zone:
 			d.powered = on
+			if d.lock == Door.Lock.MAGLOCK:
+				Sfx.play_at("maglock", d.global_position + Vector3.UP, -4.0)
 	for sl in facility.searchlights:
 		if sl.get_meta("zone") == breaker.zone:
 			sl.visible = on
 	_light_t = 0.0
+	Sfx.play_at("breaker", breaker.global_position + Vector3.UP, -2.0)
+	Sfx.play_at("power_up" if on else "power_down", breaker.global_position + Vector3.UP, 0.0, false)
+	if _zone_of(player.global_position) == breaker.zone:
+		Sfx.play("power_up" if on else "power_down", -12.0)
 	if on:
 		return
 	hud.learn("lights")
@@ -1204,11 +1372,12 @@ func data_downloaded() -> void:
 
 func camera_alarm(cam: Device) -> void:
 	Sfx.play_at("alarm", cam.global_position, 2.0, false)
+	spotted_cue()
 	hud.hint_event("camera_alarm")
 	if comms_down:
 		hud.toast("CAMERA ALARM  ·  NOBODY ON THE RADIO TO HEAR IT")
 		return
-	hud.subtitle("SECURITY", "Intruder on %s." % cam.label)
+	security_say("cam", cam.label)
 	_dispatch(player.global_position, "saw")
 	dispatch_drone(player.global_position)
 	hq.camera_contact(player.global_position)
@@ -1286,7 +1455,10 @@ func _tick_tool(dt: float) -> void:
 	if act.is_empty() or not Input.is_action_pressed("interact"):
 		tool_target = {}
 		tool_progress = 0.0
+		Sfx.stop_loop("tool")
 		return
+	var at: Vector3 = (act.soldier.global_position + Vector3.UP) if act.kind == "clone" else (act.door.global_position + Vector3.UP * 1.2)
+	Sfx.loop_at("tool", "clone_loop" if act.kind == "clone" else "splice_loop", at, -10.0, 1.5, 12.0)
 	# same action continuing?
 	if tool_target.get("kind") != act.kind or tool_target.get("door") != act.get("door") or tool_target.get("soldier") != act.get("soldier"):
 		tool_target = act
@@ -1304,14 +1476,14 @@ func _finish_tool(act: Dictionary) -> void:
 			var s: Soldier = act.soldier
 			for a: String in s.badge:
 				access[a] = true
-			hud.toast("BADGE CLONED  ·  " + "  ·  ".join(s.badge.map(func(a: String) -> String: return a.to_upper())))
-			Sfx.play("pickup")
+			hud.toast("BADGE CLONED  ·  " + "  ·  ".join(s.badge.map(func(a: String) -> String: return a.to_upper())), false)
+			Sfx.ui("badge_ok", -6.0)
 			hud.hint_event("badge")
 		"splice":
 			var d: Door = act.door
 			d.unlocked = true
 			add_trace(10.0, "Reader spliced: %s" % d.label)
-			Sfx.play_at("deny", d.global_position + Vector3.UP, -4.0)
+			Sfx.play_at("maglock", d.global_position + Vector3.UP, -2.0)
 			hud.toast("%s  ·  READER SPLICED" % d.label)
 			# shorting a reader is noticed if a camera or guard sees it
 			for o in soldiers:
@@ -1397,17 +1569,17 @@ func interact() -> void:
 				hud.toast("NOT HURT")
 				return
 			player.treat()
-			hud.toast("WOUNDS TREATED")
+			hud.toast("WOUNDS TREATED", false)
 		Pickup.Kind.AMMO:
 			player.weapons.resupply()
-			hud.toast("RESUPPLIED")
+			hud.toast("RESUPPLIED", false)
 		Pickup.Kind.INTEL:
 			_take_intel()
 		Pickup.Kind.WEAPON:
 			var old := player.weapons.swap_primary(p.weapon, p.mag_rounds, p.spares)
 			var drop := player.global_position + player.forward() * 0.4
 			facility.place(Pickup.dropped_weapon(drop, old.weapon, old.mag, old.spares))
-			hud.toast(p.weapon.display_name + "  ·  " + p.weapon.caliber)
+			hud.toast(p.weapon.display_name + "  ·  " + p.weapon.caliber, false)
 			hud.hint_event("scavenge")
 	p.take()
 
@@ -1423,7 +1595,7 @@ func _tick_pickups() -> void:
 			if used == 0:
 				continue
 			p.amount -= used
-			hud.toast("+%d  %s" % [used, p.caliber])
+			hud.toast("+%d  %s" % [used, p.caliber], false)
 			Sfx.play("pickup")
 			if p.amount > 0:
 				continue
@@ -1435,7 +1607,8 @@ func _tick_pickups() -> void:
 			if g.is_empty() or int(g.n) >= 3:
 				continue
 			g.n = int(g.n) + 1
-			hud.toast("+1 FRAG")
+			hud.toast("+1 FRAG", false)
+			Sfx.play("pickup")
 		p.take()
 
 

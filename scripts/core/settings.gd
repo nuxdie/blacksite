@@ -10,6 +10,12 @@ var primary := "carbine"
 var gadgets: Array[String] = ["frag", "smoke"]
 var learned: Dictionary = {}
 var best_time := -1.0
+## Mix levels, 0..1.
+var vol_master := 1.0
+var vol_effects := 1.0
+var vol_voice := 1.0
+var vol_ambience := 1.0
+var subtitles := true
 var _glyphs: Dictionary = {}
 ## Automated test runs must not touch the player's saved settings.
 var persist := true
@@ -105,6 +111,11 @@ func load_settings() -> void:
 		gadgets.append(String(x))
 	learned = cfg.get_value("hints", "learned", {})
 	best_time = cfg.get_value("records", "best_time", -1.0)
+	vol_master = cfg.get_value("audio", "master", 1.0)
+	vol_effects = cfg.get_value("audio", "effects", 1.0)
+	vol_voice = cfg.get_value("audio", "voice", 1.0)
+	vol_ambience = cfg.get_value("audio", "ambience", 1.0)
+	subtitles = cfg.get_value("audio", "subtitles", true)
 
 
 func save_settings() -> void:
@@ -117,6 +128,11 @@ func save_settings() -> void:
 	cfg.set_value("loadout", "gadgets", gadgets)
 	cfg.set_value("hints", "learned", learned)
 	cfg.set_value("records", "best_time", best_time)
+	cfg.set_value("audio", "master", vol_master)
+	cfg.set_value("audio", "effects", vol_effects)
+	cfg.set_value("audio", "voice", vol_voice)
+	cfg.set_value("audio", "ambience", vol_ambience)
+	cfg.set_value("audio", "subtitles", subtitles)
 	cfg.save(PATH)
 
 

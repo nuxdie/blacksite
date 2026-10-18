@@ -5,6 +5,7 @@ extends Node
 ##   --shots=<dir>       capture screenshots at fixed viewpoints (needs a window)
 ##   --uishots=<dir>     capture the HUD in a series of game states (needs a window)
 ##   --sim=<seconds>     run a combat bot for that long and report
+##   --test=<name>       run one check (consequences, security, drones, fairness, ...) and print it
 
 var game: Game
 var _args: Dictionary = {}
@@ -26,6 +27,9 @@ func start() -> void:
 		await _ui_shots(_args["uishots"])
 	if _args.has("autotest"):
 		await _autotest()
+	if _args.has("test"):
+		var r: Dictionary = await call("_" + String(_args["test"]))
+		print("TEST ", JSON.stringify(r))
 	if _args.has("sim"):
 		await _sim(float(_args["sim"]))
 	get_tree().quit()
@@ -438,10 +442,43 @@ func _autotest() -> void:
 	r["duel"] = {"first_hit_s": snappedf(first, 0.01), "hp": roundi(game.player.hp), "alive": game.player.alive, "enemy_shots": game.stats.enemy_shots, "enemy_hits": game.stats.enemy_hits, "sees": e.sees, "mode": Soldier.Mode.keys()[e.mode], "seen_frames": seen_frames, "peek_frames": peeks, "min_err": snappedf(min_err, 0.001), "muzzle": e.model.muzzle.global_position.snappedf(0.01), "pos": e.global_position.snappedf(0.01)}
 	game.god_mode = true
 	r["ms"] = Time.get_ticks_msec() - t0
+	r["audio"] = _audio()
 	print("AUTOTEST ", JSON.stringify(r))
 
 
 ## Splicing a door reader: offered only at a secured door you can't badge, opens it, costs trace.
+## Every cue the game asks for exists in the bank, and every spoken line has a rendered take in
+## every voice that can say it.
+func _audio() -> Dictionary:
+	var out := {"missing_cues": [], "missing_lines": 0, "lines_checked": 0, "voice_ok": false}
+	for key in ["notice", "unnotice", "spotted", "lost_you", "hq_tone", "radio_open", "radio_close", "badge_ok", "maglock", "breaker",
+			"power_down", "power_up", "comms_cut", "comms_up", "cam_notice", "cam_dead", "drone_scan", "drone_lock", "drone_down", "emp",
+			"flashlight", "truck_door", "key", "term_login", "term_ok", "term_err", "term_trace", "term_kick", "toast", "banner", "save",
+			"load", "pause", "extracted", "death", "selector", "weapon_pickup", "hurt_breath", "bleed", "medkit",
+			"bed_notice", "bed_hunt", "amb_interior", "term_hum", "splice_loop", "clone_loop", "work_loop", "vent_loop", "relay_loop", "copy_loop", "cam_servo", "motor"]:
+		if not Sfx.bank.has(key):
+			(out.missing_cues as Array).append(key)
+	for v in Lines.guard_voices():
+		for kind in ["contact", "huh", "calm", "lost", "search", "radio", "reload", "body", "cover", "mandown"]:
+			for i in Lines.guard(kind).size():
+				out.lines_checked += 1
+				if Sfx.voice_path(v, kind, i) == "" or Sfx.voice_path(v, kind, i, "", true) == "":
+					out.missing_lines += 1
+	var callsigns := Lines.callsigns()
+	for i in callsigns.size():
+		out.lines_checked += 1
+		if Sfx.voice_path(Lines.guard_voice(i), "check_in", 0, Lines.slug(callsigns[i])) == "":
+			out.missing_lines += 1
+	for kind in ["check", "caution", "alarm", "qrf", "stand"]:
+		for i in Lines.hq(kind).size():
+			out.lines_checked += 1
+			if Sfx.voice_path(Lines.hq_voice(), kind, i, "", true) == "":
+				out.missing_lines += 1
+	var path := Sfx.voice_path("g0", "contact", 0)
+	out.voice_ok = path != "" and Sfx.voice_length(path) > 0.2
+	return out
+
+
 func _multitool() -> Dictionary:
 	var c := {}
 	await _fresh("carbine")
@@ -755,11 +792,13 @@ func _consequences() -> Dictionary:
 	await _fresh("carbine")
 	var victim := _find("wh", 26.0)
 	victim.die(Vector3.FORWARD, false, true)
-	victim.global_position = Vector3(26, 0, -9)
-	game.player.global_position = Vector3(24, 0, -11)
+	# the body goes where nobody will find it (a found body raises the alarm, which cancels the
+	# check), and you listen from outside the wire where nobody can spot you
+	victim.global_position = Vector3(-60, 0, -9)
+	game.player.global_position = game.facility.player_start
 	game.hq._check_t = 0.1
 	var investigated := false
-	for _i in 60 * 25:
+	for _i in 60 * 30:
 		await get_tree().physics_frame
 		if game.hq.stats.missed_checks > 0 and not c.has("level_after_check"):
 			c["level_after_check"] = Command.Level.keys()[game.hq.level]
@@ -981,6 +1020,19 @@ func _ui_shots(dir: String) -> void:
 	game.pause()
 	await get_tree().create_timer(0.3).timeout
 	_snap(dir + "/ui_pause.png")
+	game.menu.show_settings(game.menu.show_pause)
+	await get_tree().create_timer(0.3).timeout
+	_snap(dir + "/ui_settings.png")
+	game.resume()
+	game.to_menu()
+	await get_tree().create_timer(0.3).timeout
+	_snap(dir + "/ui_title.png")
+	game.start_mission()
+	await _frames(3)
+	game.menu.show_debrief(true, "GHOST")
+	await get_tree().create_timer(0.3).timeout
+	_snap(dir + "/ui_debrief.png")
+	game.menu.hide_all()
 	game.resume()
 	# guards up close: the three types side by side, calm and alert
 	await _fresh("carbine")
@@ -1025,3 +1077,21 @@ func _snap(path: String) -> void:
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(path)
 	print("SHOT ", path)
+
+
+
+## Peak and RMS of every synthesized cue in the bank, so silent or clipping ones stand out.
+func _levels() -> Dictionary:
+	var out := {}
+	for key in Sfx.bank:
+		var wav: AudioStreamWAV = Sfx.bank[key]
+		var d := wav.data
+		var n := d.size() / 2
+		var peak := 0.0
+		var sq := 0.0
+		for i in n:
+			var v := absf(d.decode_s16(i * 2) / 32767.0)
+			peak = maxf(peak, v)
+			sq += v * v
+		out[key] = [snappedf(peak, 0.01), snappedf(sqrt(sq / maxf(1, n)), 0.001), snappedf(n / 44100.0, 0.01)]
+	return out

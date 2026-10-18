@@ -31,6 +31,7 @@ var _shape: CollisionShape3D
 var _panel: MeshInstance3D
 var _led: StandardMaterial3D
 var _was_open := false
+var _badge_t := 0.0
 var _deny_t := 0.0
 
 
@@ -139,6 +140,12 @@ func tick(dt: float, game: Game) -> void:
 				_deny_t = 1.2
 				Sfx.play_at("deny", c + Vector3.UP * 1.2, -8.0)
 	_deny_t -= dt
+	_badge_t -= dt
+	# a badge read: the reader chirps and the lock releases before the door moves
+	if want and secured() and open_k < 0.05 and _badge_t <= 0.0:
+		_badge_t = 2.5
+		Sfx.play_at("badge_ok", c + Vector3.UP * 1.2, -8.0)
+		Sfx.play_at("maglock", c + Vector3.UP, -8.0)
 	open_k = move_toward(open_k, 1.0 if want else 0.0, dt * SPEED)
 	var open := open_k > 0.05
 	if open != _was_open:

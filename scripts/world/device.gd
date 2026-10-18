@@ -37,6 +37,7 @@ var repair_pending := false
 
 # laptop: idle | copying | done | taken
 var copy_state := "idle"
+var _beeped := false
 var copy_progress := 0.0
 
 var _sweep_t := 0.0
@@ -345,7 +346,7 @@ func repaired(game: Game) -> void:
 	match kind:
 		Kind.RELAY:
 			sabotaged = false
-			game.comms_restored()
+			game.comms_restored(self)
 		Kind.BREAKER:
 			sabotaged = false
 			_led_mat.emission = Color("40ff90")
@@ -354,6 +355,7 @@ func repaired(game: Game) -> void:
 			disabled = false
 			_cone.visible = true
 			_lens_mat.emission_energy_multiplier = 1.5
+			Sfx.play_at("power_up", head.global_position, -10.0)
 		Kind.ACCESS:
 			game.restore_cameras()
 
@@ -361,6 +363,7 @@ func repaired(game: Game) -> void:
 ## A guard found the drive in the laptop and pulled it; the copy has to start over.
 func drive_pulled() -> void:
 	copy_state = "idle"
+	Sfx.play_at("deny", global_position + Vector3.UP * 0.3, -6.0)
 	copy_progress = 0.0
 	_drive.visible = false
 
@@ -378,6 +381,7 @@ func loop_feed() -> void:
 
 func disable() -> void:
 	disabled = true
+	Sfx.play_at("cam_dead", head.global_position, -4.0)
 	_stand_down(true)
 
 
@@ -417,7 +421,20 @@ func tick(dt: float, game: Game) -> void:
 				Sfx.play("objective", -4.0, 0.0)
 		return
 	if kind != Kind.CAMERA or disabled or destroyed:
+		if kind == Kind.CAMERA:
+			Sfx.stop_loop("cam%d" % cam_id)
 		return
+	# the pan motor is audible up close; a camera that is interested in you beeps once
+	var pd := head.global_position.distance_to(game.player.global_position)
+	if pd < 14.0 and not alarm:
+		Sfx.loop_at("cam%d" % cam_id, "cam_servo", head.global_position, -16.0, 1.2, 14.0)
+	else:
+		Sfx.stop_loop("cam%d" % cam_id)
+	if aware > 0.3 and not _beeped:
+		_beeped = true
+		Sfx.play_at("cam_notice", head.global_position, -6.0, false, 0.0)
+	elif aware < 0.1:
+		_beeped = false
 	if looped > 0.0:
 		looped -= dt
 		if looped <= 0.0:

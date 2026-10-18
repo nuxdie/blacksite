@@ -86,7 +86,7 @@ func cycle_mode() -> void:
 	var w := current()
 	if w.modes.size() > 1:
 		mode[cur] = (mode[cur] + 1) % w.modes.size()
-		Sfx.play("dry")
+		Sfx.play("selector", -4.0)
 		player.game.hud.learn("fire_mode")
 
 
@@ -246,6 +246,7 @@ func swap_primary(data: WeaponData, in_mag: int, p_spares: Array) -> Dictionary:
 	pending = -1
 	switch_t = SWITCH_TIME
 	player.viewmodel.show_weapon(data.id)
+	Sfx.play("weapon_pickup", -2.0)
 	return old
 
 
@@ -257,6 +258,7 @@ func resupply() -> void:
 		spare[i] = s
 	for g in gadgets:
 		g.n = mini(3, int(g.n) + 1)
+	Sfx.play("mag_in", -2.0)
 
 
 func gadget_info() -> Dictionary:

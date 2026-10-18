@@ -299,7 +299,7 @@ func _cmd_relay(args: Array) -> void:
 		_out("radio net down — alarms go nowhere now", "green")
 	elif not off and game.comms_down:
 		relay.sabotaged = false
-		game.comms_restored()
+		game.comms_restored(relay)
 		_out("relay back up", "amber")
 	else:
 		_out("relay already %s" % ("down" if off else "up"), "dim")
@@ -381,6 +381,10 @@ func suggestions() -> Array:
 
 func _out(text: String, tag := "plain") -> void:
 	log.append({"text": text, "tag": tag})
+	if tag == "red":
+		Sfx.ui("term_err", -8.0)
+	elif tag == "green":
+		Sfx.ui("term_ok", -10.0)
 	if log.size() > 80:
 		log.pop_front()
 

@@ -2,6 +2,8 @@ class_name Synth
 extends RefCounted
 ## Renders layered procedural sounds (filtered noise + oscillators) into AudioStreamWAV.
 ## A layer is a Dictionary: type (noise|sine|square|saw|tri), f0, f1, dur, vol, at, attack,
+## hold (fraction of dur kept at full volume before the decay), trem/trem_d (amplitude
+## tremolo rate in Hz and depth 0..1), vib/vib_d (pitch vibrato rate and depth as a fraction),
 ## and for noise: filter (lp|hp|bp) and q.
 
 const RATE := 44100
@@ -42,6 +44,11 @@ static func _layer(buf: PackedFloat32Array, l: Dictionary, sustain: bool) -> voi
 	var vol: float = l.get("vol", 0.3)
 	var at: float = l.get("at", 0.0)
 	var attack: float = maxf(l.get("attack", 0.003), 0.0005)
+	var hold: float = clampf(l.get("hold", 0.0), 0.0, 0.98)
+	var trem: float = l.get("trem", 0.0)
+	var trem_d: float = l.get("trem_d", 0.6)
+	var vib: float = l.get("vib", 0.0)
+	var vib_d: float = l.get("vib_d", 0.02)
 	var filt: String = l.get("filter", "lp")
 	var damp := 1.0 / maxf(float(l.get("q", 0.7)), 0.5)
 	var start := int(at * RATE)
@@ -51,17 +58,24 @@ static func _layer(buf: PackedFloat32Array, l: Dictionary, sustain: bool) -> voi
 	var low := 0.0
 	var band := 0.0
 	var floor_db := 0.0001 / vol
+	var hold_t := hold * dur
 	for i in count:
 		var t := float(i) / RATE
 		var k := t / dur
 		var f := f0 * pow(ratio, k)
+		if vib > 0.0:
+			f *= 1.0 + vib_d * sin(TAU * vib * t)
 		var env: float
 		if sustain:
 			env = vol
 		elif t < attack:
 			env = vol * (t / attack)
+		elif t < hold_t:
+			env = vol
 		else:
-			env = vol * pow(floor_db, (t - attack) / maxf(dur - attack, 0.001))
+			env = vol * pow(floor_db, (t - hold_t) / maxf(dur - hold_t, 0.001))
+		if trem > 0.0:
+			env *= 1.0 - trem_d * 0.5 * (1.0 + sin(TAU * trem * t))
 		var s := 0.0
 		if kind == "noise":
 			var fk := 2.0 * sin(PI * minf(f, 9000.0) / RATE)

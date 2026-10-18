@@ -97,6 +97,12 @@ var limp := 1.0
 var climb: Dictionary = {}
 ## Seconds left on a radio call to HQ (hand on the radio); killing them now stops it.
 var radio_t := 0.0
+## Which rendered voice this guard speaks with (see Lines), and the line in progress.
+var voice := "g0"
+var _voice_player: AudioStreamPlayer3D
+var _voice_stream: AudioStream
+var _noticed := false
+var _flashlight_was := false
 
 
 func setup(p_profile: SoldierProfile, p_squad: Squad, pos: Vector3, p_yaw: float, p_patrol: Array) -> void:
@@ -114,6 +120,7 @@ func setup(p_profile: SoldierProfile, p_squad: Squad, pos: Vector3, p_yaw: float
 	look_yaw = p_yaw
 	for wp in p_patrol:
 		patrol.append(Vector3(wp[0], pos.y, wp[1]))
+	_flashlight_was = not patrol.is_empty()
 	wait_t = randf_range(0.0, 2.0)
 	perc_t = randf() * 0.1
 	think_t = randf() * 0.5
@@ -183,6 +190,19 @@ func face(p: Vector3, rate: float, dt: float) -> void:
 
 func say(kind: String, force := false) -> void:
 	game.say(self, kind, force)
+
+
+func speaking(p: AudioStreamPlayer3D) -> void:
+	_voice_player = p
+	_voice_stream = p.stream if p else null
+
+
+## Dying cuts a sentence short.
+func _stop_voice() -> void:
+	if _voice_player and _voice_stream and _voice_player.stream == _voice_stream:
+		_voice_player.stop()
+	_voice_player = null
+	_voice_stream = null
 
 
 # ------------------------------------------------------------------ ladders
@@ -262,6 +282,8 @@ func alert(pos: Vector3, how: String) -> void:
 		think_t = react
 		aim_err = 0.16
 		game.detected = true
+		if how == "saw" and sees:
+			game.spotted_cue()
 		var line := {"saw": "contact", "body": "body", "radio": "radio", "shout": "radio"}.get(how, "heard") as String
 		say(line, how != "radio" and how != "shout")
 		if how != "radio" and how != "shout":
@@ -327,6 +349,15 @@ func _perceive(dt: float) -> void:
 			aware += dt * 0.6
 			investigate = p.global_position
 			notice = "heard"
+	# the sound of being noticed: a rising note from wherever they are, a falling one when it passes
+	if aware > 0.15 and not _noticed:
+		_noticed = true
+		if dist_p < 40.0:
+			Sfx.play_at("notice", eye(), -8.0, false, 0.0)
+	elif aware < 0.05 and _noticed:
+		_noticed = false
+		if dist_p < 40.0:
+			Sfx.play_at("unnotice", eye(), -10.0, false, 0.0)
 	if aware >= 1.0:
 		alert(p.global_position, "saw")
 	elif aware > 0.4 and state == State.CALM:
@@ -417,6 +448,10 @@ func tick(dt: float) -> void:
 	model.rotation.y = yaw
 	model.animate(dt, self)
 	model.flashlight.visible = alive and blind <= 0.0 and (state == State.SUSPICIOUS or mode == Mode.SEARCH or (state == State.CALM and (not patrol.is_empty() or game.hq.level != Command.Level.NORMAL)))
+	if model.flashlight.visible != _flashlight_was:
+		_flashlight_was = model.flashlight.visible
+		if dist_p < 22.0 and game.time > 1.0:
+			Sfx.play_at("flashlight", eye(), -8.0)
 
 
 func _check_stuck(dt: float) -> void:
@@ -744,6 +779,7 @@ func _combat(dt: float) -> void:
 				squad.known = false
 				squad.searcher = null
 				say("lost")
+				game.lost_cue()
 		_:
 			ground_move(Vector3.ZERO, 0.0, dt)
 			face(tp if sees else lkp_aim, 4.0, dt)
@@ -862,6 +898,8 @@ func _goto_cover(c: Dictionary) -> void:
 	has_cover = true
 	mode = Mode.MOVE
 	peeking = false
+	if squad.since_seen(game.time) < 3.0 and randf() < 0.4:
+		say("cover")
 
 
 func _start_search() -> void:
@@ -905,6 +943,7 @@ func die(dir: Vector3, headshot: bool, takedown: bool) -> void:
 	hp = 0.0
 	blind = 0.0
 	death_t = 0.0
+	_stop_voice()
 	fall_side = randf_range(-0.4, 0.4)
 	if dir.length() > 0.1:
 		yaw = yaw_of(dir)

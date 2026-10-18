@@ -10,7 +10,7 @@ $GODOT --path .        # play
 $GODOT -e --path .     # open in the editor
 ```
 
-The first launch synthesizes every sound and caches it under `user://` (a few seconds). The navigation mesh is baked at load.
+The first launch synthesizes every sound effect and caches it under `user://` (a few seconds). The navigation mesh is baked at load. On a fresh clone run `$GODOT --headless --path . --import` once (or open the editor) so Godot registers the script classes.
 
 There is no controls screen to memorize. Keys appear on screen when they become useful, and one-time tips teach the rest as situations come up. A reference sheet lives in the pause menu (Esc), along with sensitivity and a button to replay the tips.
 
@@ -19,7 +19,7 @@ There is no controls screen to memorize. Keys appear on screen when they become 
 ```
 project.godot            input actions are registered at runtime by Settings
 scenes/                  main, player, soldier
-scripts/core/            Settings (autoload), Sfx (autoload) + Synth, physics layers
+scripts/core/            Settings (autoload), Sfx (autoload) + Synth, Lines (the spoken-line catalogue), physics layers
 scripts/world/           Facility (level, lighting, navmesh), Lamp, Pickup, Mats (materials + penetration table)
 scripts/combat/          WeaponData resource, Ballistics (penetrating hitscan), Gadget (thrown equipment)
 scripts/player/          Player (movement, stance, lean, vault, wounds), Weapons (mags, chamber, fire, throw),
@@ -31,7 +31,32 @@ shaders/                 procedural world surfaces, night sky, screen stress eff
 resources/weapons/       carbine, smg, dmr, pistol (.tres — tune here)
 resources/soldiers/      rifleman, heavy, breacher (.tres — tune here)
 assets/fonts/            Rajdhani (SIL OFL, see OFL.txt)
+assets/voice/            lines.json (every spoken line) and the rendered takes, one folder per voice
+tools/voices/            render.py: regenerates assets/voice with Piper (see below)
 ```
+
+## Interface
+
+The HUD is one overlay with four quiet corners and an empty centre. Top left: where you are and the state of the site (quiet, caution, alarm, reaction-force timer, their radio down, trace). Top centre: a heading arc with the objective riding on it and its distance. Centre: nothing until someone notices you; then arcs point at whoever is interested, a line above the sights says why (lit, too close, in their view, too loud, on camera, spotted), and the edges of the frame warm amber or red. Bottom left: how visible you are, how far your footsteps carry, your stance, and your wounds while they matter. Bottom right: what is in your hands, shown only while it is low or changing, and your equipment. Key prompts appear in the centre when they apply; one-time tips teach the rest. Guards speak with their callsigns under their lines; radio traffic carries the three-arc mark.
+
+## Sound
+
+Everything you can see is also said in the mix. Guards speak: six rendered voices, shouted lines heard in person and squad-net lines heard through the nearest radio (a guard's, or a body's), cut off if the speaker dies mid-sentence. HQ runs radio checks that every living guard answers by callsign, and opens priority traffic (caution, alarm, stand-down, reaction force) with a two-tone alert. The security desk calls out cameras and drones. Being noticed is a rising note from where the watcher stands; being written off is a falling one; being spotted is a sting. A soft bed sits under the mix while someone is interested in you and a pulsing one while you are hunted. Indoors swaps wind for ventilation. Machines keep making their noise: searchlight motors, camera pan servos, the laptop copying, the terminal hum, trace warnings, drone scan pings and lock tones, badge readers, maglocks, breakers, power dropping out, the relay dying and coming back.
+
+Volumes (master, effects, voices, ambience) and subtitles live in Settings.
+
+### Regenerating the voices
+
+Lines are in `assets/voice/lines.json`; the game reads them from there, so changing a line means re-rendering its audio:
+
+```sh
+python3 -m venv ~/.venv/piper && ~/.venv/piper/bin/pip install piper-tts
+~/.venv/piper/bin/python -m piper.download_voices --data-dir ~/piper-voices \
+    en_US-joe-medium en_GB-northern_english_male-medium en_US-arctic-medium en_GB-alan-medium en_US-ryan-high
+~/.venv/piper/bin/python tools/voices/render.py --voices ~/piper-voices
+```
+
+Needs `sox` and `ffmpeg`. Existing takes are skipped, so delete a file to re-render it.
 
 ## Systems at a glance
 

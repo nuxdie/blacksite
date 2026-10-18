@@ -14,16 +14,8 @@ const CHECK_EVERY := 95.0
 const QRF_DELAY := 70.0
 const ALARM_HOLD := 120.0
 const SPEAKERS := [Vector3(10.2, 7.0, 4.0), Vector3(-15.0, 4.2, 12.0), Vector3(-12.5, 3.0, -15.5), Vector3(-24.0, 6.5, -24.0), Vector3(30.0, 6.5, -24.0)]
-const LINES := {
-	"check": ["All posts, radio check.", "Radio check, all posts. Sound off."],
-	"clear": ["%s, all clear.", "%s, nothing to report.", "%s here, quiet."],
-	"respond": ["%s, respond.", "%s, radio check. Do you copy?"],
-	"silent": ["%s isn't answering. Someone go check their post.", "Lost contact with %s. Send someone over."],
-	"caution": ["All units, be advised: something's off. Stay sharp.", "All posts, heads up. Eyes open."],
-	"alarm": ["All units: intruder on site! Lock it down!", "Contact reported. All units, respond!"],
-	"qrf": ["Reaction force is on site.", "QRF is here. Moving in."],
-	"stand": ["All units, hold positions and stay alert.", "No contact. Stay sharp, keep looking."],
-}
+## Broadcasts that open with the priority tone.
+const PRIORITY := ["caution", "alarm", "stand", "qrf"]
 
 var game: Game
 var level := Level.NORMAL
@@ -149,7 +141,7 @@ func _tick_checks(dt: float) -> void:
 		for s in game.soldiers:
 			if s.alive and s.state != Soldier.State.COMBAT and not (_check.answered as Array).has(s) and t > 1.2 + s.call_order * 0.9:
 				(_check.answered as Array).append(s)
-				_say_from(s, (LINES.clear as Array).pick_random() % s.callsign)
+				game.checkin(s, randi() % maxi(1, Lines.guard("check_in").size()))
 		if t > 2.0 + game.soldiers.size() * 0.9:
 			for s in game.soldiers:
 				if not s.alive and not s.accounted:
@@ -159,10 +151,10 @@ func _tick_checks(dt: float) -> void:
 				return
 			_check.stage = 1
 			_check.t = 0.0
-			_say_hq_text((LINES.respond as Array).pick_random() % (_check.missing[0] as Soldier).callsign)
+			_say_hq("respond", (_check.missing[0] as Soldier).callsign)
 	elif int(_check.stage) == 1 and t > 9.0:
 		var who: Soldier = _check.missing[0]
-		_say_hq_text((LINES.silent as Array).pick_random() % who.callsign)
+		_say_hq("silent", who.callsign)
 		for m: Soldier in _check.missing:
 			m.accounted = true
 			stats.missed_checks += 1
@@ -174,25 +166,17 @@ func _tick_checks(dt: float) -> void:
 
 # ------------------------------------------------------------------ radio traffic
 
-## You only hear the net through a guard's radio: a living guard or a body nearby.
-func _audible() -> bool:
-	var p := game.player.global_position
-	for s in game.soldiers:
-		if s.global_position.distance_to(p) < 22.0:
-			return true
-	return false
+## HQ on the net. You only hear it through a radio nearby: a guard's, or a body's.
+func _say_hq(kind: String, callsign := "") -> void:
+	var texts := Lines.hq(kind)
+	if texts.is_empty():
+		return
+	var i := randi() % texts.size()
+	var text: String = texts[i]
+	if callsign != "":
+		text = text % callsign
+	game.net_say("HQ", Lines.hq_voice(), kind, i, Lines.slug(callsign) if callsign != "" else "", text, PRIORITY.has(kind))
 
 
-func _say_hq(kind: String, always := false) -> void:
-	_say_hq_text((LINES[kind] as Array).pick_random(), always)
-
-
-func _say_hq_text(text: String, always := false) -> void:
-	if always or _audible():
-		Sfx.play("radio", -10.0)
-		game.hud.subtitle("HQ", text)
-
-
-func _say_from(s: Soldier, text: String) -> void:
-	if s.global_position.distance_to(game.player.global_position) < 22.0:
-		game.hud.subtitle(s.callsign.to_upper(), text)
+func announce(kind: String) -> void:
+	_say_hq(kind)

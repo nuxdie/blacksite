@@ -18,6 +18,7 @@ var route: Array[Vector3] = []
 var home := Vector3.ZERO
 var mode := Mode.PATROL
 var aware := 0.0
+var _ping_t := 0.0
 var sees_player := false
 var destroyed := false
 var down_t := 0.0
@@ -176,6 +177,8 @@ func emp(seconds: float) -> void:
 	down_t = maxf(down_t, seconds)
 	aware = 0.0
 	mode = Mode.DOWN
+	Sfx.play_at("emp", global_position, 0.0, false)
+	Sfx.play_at("drone_down", global_position, -4.0, false)
 
 
 # ------------------------------------------------------------------ think
@@ -241,7 +244,13 @@ func _scan(dt: float) -> void:
 		_lost = 0.0
 		if aware >= 1.0 and mode != Mode.TRACK:
 			mode = Mode.TRACK
+			Sfx.play_at("drone_lock", global_position, -2.0, false, 0.0)
 			game.drone_alarm(self)
+		elif aware > 0.3 and mode != Mode.TRACK:
+			_ping_t -= dt
+			if _ping_t <= 0.0:
+				_ping_t = 1.0
+				Sfx.play_at("drone_scan", global_position, -6.0, false, 0.0)
 	else:
 		aware = maxf(0.0, aware - dt * (0.06 if mode == Mode.TRACK else 0.18))
 		_lost += dt

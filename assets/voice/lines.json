@@ -1,0 +1,57 @@
+{
+  "_": "Every spoken line in the game. tools/voices/render.py turns this into assets/voice/<voice>/<kind>_<n>[.r].ogg; Game and Command read the text from here so subtitles and audio never drift apart.",
+  "voices": {
+    "guards": ["g0", "g1", "g2", "g3", "g4", "g5"],
+    "hq": "hq",
+    "security": "sec"
+  },
+  "callsigns": ["Gate 1", "Gate 2", "Gate 3", "Gate 4", "Gate 5", "Office 1", "Office 2", "Office 3", "Office 4",
+    "Warehouse 1", "Warehouse 2", "Warehouse 3", "Warehouse 4", "Warehouse 5", "Warehouse 6",
+    "Reaction 1", "Reaction 2", "Reaction 3", "Reaction 4", "Reaction 5"],
+  "labels": {
+    "cam": ["CAM 01", "CAM 02", "CAM 03", "CAM 04", "CAM 05"],
+    "drone": ["DRONE-1", "DRONE-2"]
+  },
+  "guard": {
+    "contact": ["Contact!", "Got eyes on him!", "There he is!", "Intruder! Right there!"],
+    "heard": ["Shots fired!", "Gunfire, stay sharp!", "That was a shot!"],
+    "radio": ["Copy, moving!", "On my way!", "Copy that, en route."],
+    "flank": ["Flanking!", "Moving to flank!", "I'm going around!"],
+    "reload": ["Reloading!", "Changing mag!", "Cover me, reloading!"],
+    "nade": ["Frag out!", "Grenade out!"],
+    "nade_warn": ["Grenade!", "Get clear!", "Frag! Move!"],
+    "mandown": ["Man down!", "We lost one!", "He's hit, he's down!"],
+    "lost": ["Lost visual.", "Where'd he go?", "I don't see him."],
+    "search": ["Moving up.", "I'll check it.", "Sweeping this way."],
+    "hit": ["I'm hit!", "Taking fire!", "Argh, I'm hit!"],
+    "supp": ["Suppressing!", "Keep his head down!", "Laying it down!"],
+    "huh": ["Huh?", "Hold on...", "What was that?", "Hm. Something there?"],
+    "calm": ["Must be nothing.", "...Nothing.", "Probably the wind.", "All quiet. Moving on."],
+    "push": ["Pushing!", "Moving in!", "Go, go!"],
+    "body": ["Body here!", "Someone's down!", "We've got a man down over here!"],
+    "blind": ["I can't see!", "Flash, I'm blind!", "My eyes!"],
+    "lights": ["Lights just went out...", "Who killed the lights?", "Hey, the light's out."],
+    "noise": ["Hear that?", "Something over there...", "Did you hear something?"],
+    "jammed": ["Radio check, anyone?", "Comms are down!", "I've got nothing but static."],
+    "power": ["Power's out.", "Lights just died...", "Who tripped the breaker?"],
+    "repair": ["I'll go take a look.", "On it, checking the box.", "I'll go reset it."],
+    "pulled": ["Someone's been at the laptop!", "There's a drive in here!", "Who left this plugged in?"],
+    "smoke": ["Smoke! Watch the smoke!", "He's in the smoke!"],
+    "cover": ["Get down!", "Cover!", "Behind the wall, now!"],
+    "check_in": ["%s, all clear.", "%s, nothing to report.", "%s here, quiet."]
+  },
+  "hq": {
+    "check": ["All posts, radio check.", "Radio check, all posts. Sound off."],
+    "respond": ["%s, respond.", "%s, radio check. Do you copy?"],
+    "silent": ["%s isn't answering. Someone go check their post.", "Lost contact with %s. Send someone over."],
+    "caution": ["All units, be advised: something's off. Stay sharp.", "All posts, heads up. Eyes open."],
+    "alarm": ["All units: intruder on site! Lock it down!", "Contact reported. All units, respond!"],
+    "qrf": ["Reaction force is on site.", "QRF is here. Moving in."],
+    "stand": ["All units, hold positions and stay alert.", "No contact. Stay sharp, keep looking."]
+  },
+  "security": {
+    "cam": ["Intruder on %s.", "Security here. Movement on %s, confirmed intruder."],
+    "drone": ["%s has eyes on the intruder.", "%s is tracking the intruder."],
+    "cam_lost": ["Lost the feed on %s.", "%s just went dark."]
+  }
+}
