@@ -282,6 +282,10 @@ func _autotest() -> void:
 	await _frames(3)
 	hk["tablet_open"] = game.tablet_access == junction
 	hk["trace_after_bypass"] = roundi(game.trace)
+	await _console("nmap")
+	hk["nmap_hosts"] = game.console.hosts().size()
+	hk["nmap_scanned"] = game.console.scanned
+	await _console("nmap cam-01")
 	await _console("loop 1")
 	hk["cam1_looped"] = cams[0].looped > 0.0
 	await _console("kill 3")

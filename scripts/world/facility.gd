@@ -17,6 +17,9 @@ var ladders: Array[Ladder] = []
 var drones: Array[Drone] = []
 ## Crawlspaces (axis-aligned boxes) where moving makes a racket on sheet metal.
 var ducts: Array[AABB] = []
+## Footprints (world x-z rectangles) of tall structural boxes, for the minimap.
+var footprints: Array[Rect2] = []
+var _map_bounds := Rect2()
 ## Insertion and extraction: outside the west wall, through a breach in it.
 var extraction := Vector3(-53.6, 0, -29.3)
 var intel_pos := Vector3(46, 5.0, 28.2)
@@ -40,6 +43,9 @@ func box(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, mat: 
 	var mn := Vector3(minf(x0, x1), y0, minf(z0, z1))
 	var mx := Vector3(maxf(x0, x1), y1, maxf(z0, z1))
 	var size := mx - mn
+	# tall, collidable boxes are walls, containers and buildings: remember their footprint for the map
+	if collide and size.y >= 1.3 and size.x * size.z < 900.0:
+		footprints.append(Rect2(mn.x, mn.z, size.x, size.z))
 	var mi := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = size
@@ -151,18 +157,21 @@ func stairs(x0: float, z0: float, x1: float, z1: float, base: float, top: float,
 		c.y = base + rise * (i + 1) / n - 0.03
 		var size := Vector3(step_run, 0.05, width) if axis == "x" else Vector3(width, 0.05, step_run)
 		deco(c, size, tread_mat)
-	var slope := atan2(rise, run)
 	var length := sqrt(rise * rise + run * run)
 	var mid := start + along * run * 0.5 + Vector3.UP * rise * 0.5
-	# stringers and rails tilt about the horizontal axis across the flight
-	var basis_rot := Basis(across, slope * (1.0 if dir > 0 else -1.0) * (-1.0 if axis == "x" else 1.0))
+	# a basis whose local X runs up the flight (bottom to top) and whose local Z lies across it,
+	# so stringers and rails follow the same slope as the steps on every axis and direction
+	var dirn := (along * run + Vector3.UP * rise) / length
+	var yb := across.cross(dirn).normalized()
+	var zb := dirn.cross(yb).normalized()
+	var flight := Basis(dirn, yb, zb)
 	for side: float in [-0.5, 0.5]:
 		var off := across * width * side
-		var str_mi := deco(mid + off - Vector3.UP * 0.08, Vector3(length, 0.22, 0.05) if axis == "x" else Vector3(0.05, 0.22, length), steel)
-		str_mi.basis = basis_rot * str_mi.basis
+		var str_mi := deco(mid + off - Vector3.UP * 0.08, Vector3(length, 0.22, 0.05), steel)
+		str_mi.basis = flight
 		if rails:
-			var rail := deco(mid + off + Vector3.UP * 0.92, Vector3(length, 0.04, 0.04) if axis == "x" else Vector3(0.04, 0.04, length), steel)
-			rail.basis = basis_rot * rail.basis
+			var rail := deco(mid + off + Vector3.UP * 0.92, Vector3(length, 0.04, 0.04), steel)
+			rail.basis = flight
 			for k in 3:
 				var t := (k + 0.5) / 3.0
 				var pc := start + along * run * t + off + Vector3.UP * (rise * t + 0.46)
@@ -870,6 +879,17 @@ func _door(d: Door) -> void:
 
 
 ## Where you are, for the HUD.
+## World x-z bounds of the mapped structure, padded a little. Cached after first call.
+func map_bounds() -> Rect2:
+	if _map_bounds.size.x > 0.0:
+		return _map_bounds
+	var b := Rect2(-55, -37, 106, 74)
+	for r in footprints:
+		b = b.merge(r)
+	_map_bounds = b.grow(2.0)
+	return _map_bounds
+
+
 func area_name(p: Vector3) -> String:
 	if p.x < -50.5 or p.x > 50.5 or absf(p.z) > 36.5:
 		return "OUTSIDE THE WIRE"

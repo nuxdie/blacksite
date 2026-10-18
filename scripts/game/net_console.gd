@@ -1,14 +1,14 @@
 class_name NetConsole
 extends RefCounted
-## A live command console on the facility's security network, opened at an access point.
+## The command console on the operator's handheld deck, used against facility security props.
 ##
-## You type commands to work the network: list nodes, watch and loop cameras, release door locks,
-## cut power, jam the relay, ground drones. Every command costs trace; some need an admin session
-## (a security badge). It is self-documenting: `help` and the on-screen palette list what you can
-## run right now, with cost and whether it needs admin, so nothing has to be memorised.
+## You reach it only by clipping the deck's wired implant to an access port. The deck is a small
+## field unit with a fold-out keyboard. You map what is on the line with `nmap`, then address each
+## prop by its name or address and act on it with a named command. Every command raises a trace
+## meter that locks you out if it fills; a few need an admin session from a security badge.
 ##
-## This operates only on game objects (cameras, doors, breakers, the relay, drones). It is not a
-## real shell and runs nothing on the host machine.
+## This is entirely game fiction and operates only on in-game props (cameras, doors, breakers, the
+## radio relay, drones). It performs no real scanning or networking of any kind.
 
 var game: Game
 var node: Device
@@ -22,8 +22,11 @@ var hist_i := 0
 var watch_cam := 0
 ## Transient highlight of a device just acted on, for the feed/overlay.
 var flash := ""
+## True once nmap has listed the props this session.
+var scanned := false
 
-const PROMPT := "sec@node"
+const PROMPT := "operator@deck"
+const SUBNET := "10.13.37.0/24"
 
 
 func open(p_node: Device, p_admin: bool) -> void:
@@ -33,10 +36,12 @@ func open(p_node: Device, p_admin: bool) -> void:
 	input = ""
 	cursor = 0
 	log.clear()
+	history.clear()
 	hist_i = 0
-	_out("BLACKSITE SITE SECURITY  //  node %s" % _slug(node.label), "dim")
-	_out("Session: %s" % ("ADMIN" if admin else "guest (exploited)"), "amber" if not admin else "green")
-	_out("Type a command. `help` lists them, Tab completes.", "dim")
+	scanned = false
+	_out("deck: implant clipped to %s  ·  %s" % [_slug(node.label), SUBNET], "dim")
+	_out("session: %s" % ("admin (badge)" if admin else "guest (no badge)"), "green" if admin else "amber")
+	_out("run `nmap` to list what's on the line. `help` lists commands, Tab completes.", "dim")
 
 
 func close() -> void:
@@ -120,54 +125,144 @@ func _run(line: String) -> void:
 	for i in range(1, parts.size()):
 		args.append(parts[i].to_lower())
 	match verb:
-		"help", "?": _cmd_help()
-		"ls", "net", "scan": _cmd_ls()
-		"cam", "watch": _cmd_watch(args)
-		"loop": _cmd_loop(args)
+		"help", "?", "man": _cmd_help()
+		"nmap", "scan", "ls", "net": _cmd_nmap(args)
+		"cam", "watch", "view": _cmd_watch(args)
+		"loop", "replay": _cmd_loop(args)
 		"kill", "disable": _cmd_kill(args)
 		"restore": _cmd_restore(args)
 		"blackout": _cmd_blackout()
-		"door", "unlock": _cmd_unlock(args)
-		"lock": _cmd_lock(args)
-		"power": _cmd_power(args)
-		"relay": _cmd_relay(args)
-		"drones": _cmd_drones(args)
+		"door", "unlock", "lock": _cmd_door(verb, args)
+		"power", "breaker": _cmd_power(args)
+		"relay", "jam": _cmd_relay(args)
+		"drones", "drone": _cmd_drones(args)
 		"clear", "cls": log.clear()
-		"logout", "exit", "quit": game.close_tablet()
-		_: _out("unknown command: %s   (try `help`)" % verb, "red")
+		"logout", "exit", "quit", "disconnect": game.close_tablet()
+		_: _out("%s: command not found   (try `help`)" % verb, "red")
 
 
 func _cmd_help() -> void:
+	_out("address a prop by its name or address — see `nmap`", "dim")
 	for c in _catalog():
 		if c.admin and not admin:
 			continue
-		_out("  %-22s %s" % [c.usage, c.help], "dim")
-	_out("  trace rises with every action; fill the bar and you're locked out.", "dim")
+		_out("  %-20s %s%s" % [c.usage, c.help, "   [admin]" if c.admin else ""], "dim")
+	_out("  every command raises trace; fill the bar and you're locked out.", "dim")
 
 
-func _cmd_ls() -> void:
-	_out("CAMERAS", "amber")
-	for i in game.cameras().size():
-		var c := game.cameras()[i]
-		var st := "live"
-		if c.destroyed: st = "no signal"
-		elif c.disabled: st = "offline"
-		elif c.looped > 0.0: st = "looped %ds" % ceili(c.looped)
-		elif c.alarm: st = "ALARM"
-		_out("  cam %d  %-14s %s" % [i + 1, _slug(c.label), st], "green" if st == "live" else "red")
-	_out("DOORS", "amber")
+# ------------------------------------------------------------------ the props list (nmap)
+
+## The props on the line, built from live game objects. Addresses are stable by role.
+func hosts() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for dv in game.facility.devices:
+		if dv.kind == Device.Kind.RELAY:
+			out.append({"ip": "10.13.37.2", "host": "relay-gw", "short": "relay", "desc": "radio relay",
+				"type": "relay", "dev": dv})
+	var i := 11
+	for c in game.cameras():
+		out.append({"ip": "10.13.37.%d" % i, "host": _slug(c.label), "short": "cam", "desc": "pan/tilt camera",
+			"type": "camera", "dev": c})
+		i += 1
+	i = 21
+	for dv in game.facility.devices:
+		if dv.kind == Device.Kind.BREAKER:
+			out.append({"ip": "10.13.37.%d" % i, "host": "plc-%s" % _slug(dv.zone), "short": "plc", "desc": "power breaker",
+				"type": "breaker", "dev": dv, "zone": _slug(dv.zone)})
+			i += 1
+	i = 31
 	for d in game.facility.doors:
-		var st2: String = "open" if not d.secured() else ("unlocked" if d.unlocked else d.access.to_upper())
-		if not d.reader_live(): st2 = "reader dead"
-		_out("  %-16s %s  [%s]" % [_slug(d.label), st2, d.zone.to_lower()], "dim")
-	_out("ZONES (power)", "amber")
-	var zones := {}
-	for l in game.facility.lamps:
-		zones[l.zone] = l.powered
-	for z: String in zones:
-		_out("  %-16s %s" % [z.to_lower(), "on" if zones[z] else "off"], "dim")
-	_out("relay  %s   drones  %d aloft" % ["jammed" if game.comms_down else "up", game.facility.drones.filter(func(dr: Drone) -> bool: return dr.scanning()).size()], "dim")
+		out.append({"ip": "10.13.37.%d" % i, "host": "rdr-%s" % _slug(d.label), "short": "door", "desc": "door reader",
+			"type": "door", "door": d})
+		i += 1
+	var lap := game.laptop()
+	if lap:
+		out.append({"ip": "10.13.37.50", "host": "ws-intel", "short": "host", "desc": "data workstation",
+			"type": "laptop", "dev": lap})
+	return out
 
+
+func _resolve(token: String) -> Dictionary:
+	for h in hosts():
+		if token == h.ip or token == h.host or (token.length() >= 2 and h.host.begins_with(token)) or h.ip.ends_with("." + token):
+			return h
+	return {}
+
+
+func _cmd_nmap(args: Array) -> void:
+	var target := ""
+	for a: String in args:
+		if not a.begins_with("-"):
+			target = a
+	if target == "":
+		_nmap_list()
+	else:
+		_nmap_host(target)
+
+
+func _nmap_list() -> void:
+	scanned = true
+	_out("nmap %s" % SUBNET, "dim")
+	var hs := hosts()
+	_out("%d props on the line" % hs.size(), "green")
+	for h in hs:
+		_out("  %-13s %-16s %-6s %s" % [h.ip, h.host, h.short, _host_state(h)], _state_tag(h))
+	_out("name one to look closer:  nmap <name>", "dim")
+
+
+func _nmap_host(token: String) -> void:
+	var h := _resolve(token)
+	if h.is_empty():
+		_out("nmap: no prop named '%s' — run `nmap` for the list" % token, "red")
+		return
+	_out("%s  ·  %s  ·  %s  [%s]" % [h.host, h.ip, h.desc, _host_state(h)], "amber")
+	_out("  → %s" % _host_hint(h), "dim")
+
+
+func _host_state(h: Dictionary) -> String:
+	match h.type:
+		"camera":
+			var c: Device = h.dev
+			if c.destroyed: return "no signal"
+			if c.disabled: return "offline"
+			if c.looped > 0.0: return "looped %ds" % ceili(c.looped)
+			if c.alarm: return "ALARM"
+			return "live"
+		"door":
+			var d: Door = h.door
+			if not d.reader_live(): return "reader dead"
+			if not d.secured(): return "open"
+			return "locked (%s)" % d.access.to_lower()
+		"breaker":
+			return "off" if (h.dev as Device).sabotaged else "on"
+		"relay":
+			return "jammed" if game.comms_down else "up"
+		"laptop":
+			var l: Device = h.dev
+			return {"idle": "idle", "copying": "copying %d%%" % roundi(l.copy_progress * 100.0), "done": "staged", "taken": "pulled"}.get(l.copy_state, "idle")
+	return ""
+
+
+func _state_tag(h: Dictionary) -> String:
+	var s := _host_state(h)
+	if s in ["ALARM", "jammed"]:
+		return "red"
+	if s in ["live", "up", "on"]:
+		return "green"
+	return "dim"
+
+
+func _host_hint(h: Dictionary) -> String:
+	match h.type:
+		"camera": return "cam %s to watch, loop %s to hold its feed, kill %s to drop it" % [h.host, h.host, h.host]
+		"door": return "door %s open|lock" % h.host
+		"breaker": return "power %s off  (admin)" % h.zone
+		"relay": return "relay down to jam the radio"
+		"laptop": return "copy the drive at the machine itself"
+	return ""
+
+
+# ------------------------------------------------------------------ cameras
 
 func _cam(args: Array) -> int:
 	if args.is_empty():
@@ -183,7 +278,7 @@ func _cam(args: Array) -> int:
 func _cmd_watch(args: Array) -> void:
 	var i := _cam(args)
 	if i < 0 or i >= game.cameras().size():
-		_out("usage: cam <n>", "red"); return
+		_out("usage: cam <camera>", "red"); return
 	watch_cam = i
 	game.tablet_cam = i
 	_out("feed: %s" % _slug(game.cameras()[i].label), "green")
@@ -193,22 +288,22 @@ func _cmd_loop(args: Array) -> void:
 	var i := _cam(args)
 	var cams := game.cameras()
 	if i < 0 or i >= cams.size():
-		_out("usage: loop <n>", "red"); return
+		_out("usage: loop <camera>", "red"); return
 	if not cams[i].camera_live():
-		_out("cam %d is not live" % (i + 1), "red"); return
+		_out("%s is not live" % _slug(cams[i].label), "red"); return
 	cams[i].loop_feed()
 	game.add_trace(12.0, "Feed buffer anomaly")
 	flash = "cam"
 	watch_cam = i
 	game.tablet_cam = i
-	_out("looping %s for %ds — nobody's watching now" % [_slug(cams[i].label), int(Device.LOOP_TIME)], "green")
+	_out("looping %s for %ds — nobody's watching it now" % [_slug(cams[i].label), int(Device.LOOP_TIME)], "green")
 
 
 func _cmd_kill(args: Array) -> void:
 	var i := _cam(args)
 	var cams := game.cameras()
 	if i < 0 or i >= cams.size():
-		_out("usage: kill <n>", "red"); return
+		_out("usage: kill <camera>", "red"); return
 	if cams[i].disabled or cams[i].destroyed:
 		_out("already down", "dim"); return
 	cams[i].disable()
@@ -221,14 +316,14 @@ func _cmd_restore(args: Array) -> void:
 	var i := _cam(args)
 	var cams := game.cameras()
 	if i < 0 or i >= cams.size() or not cams[i].disabled:
-		_out("usage: restore <n>", "red"); return
+		_out("usage: restore <camera>", "red"); return
 	cams[i].repaired(game)
 	_out("%s back online" % _slug(cams[i].label), "green")
 
 
 func _cmd_blackout() -> void:
 	if not admin:
-		_out("blackout: admin session required", "red"); return
+		_out("blackout: needs an admin session", "red"); return
 	for c in game.cameras():
 		if not c.destroyed:
 			c.disable()
@@ -237,56 +332,65 @@ func _cmd_blackout() -> void:
 	_out("all cameras down. this will be noticed fast.", "amber")
 
 
+# ------------------------------------------------------------------ doors
+
 func _door(args: Array) -> Door:
 	if args.is_empty():
 		return null
+	var tok: String = args[0]
 	for d in game.facility.doors:
-		if _slug(d.label).begins_with(args[0]):
+		if _slug(d.label).begins_with(tok) or ("rdr-" + _slug(d.label)).begins_with(tok):
 			return d
 	return null
 
 
-func _cmd_unlock(args: Array) -> void:
+func _cmd_door(verb: String, args: Array) -> void:
 	var d := _door(args)
-	if d == null:
-		_out("usage: unlock <door>   (see `ls`)", "red"); return
-	if not d.reader_live():
-		_out("%s reader is dead — no power to the strike" % _slug(d.label), "red"); return
-	d.unlocked = true
-	game.add_trace(15.0, "Door forced: %s" % d.label)
-	_out("%s unlocked" % _slug(d.label), "green")
+	var action := ""
+	if verb == "unlock":
+		action = "open"
+	elif verb == "lock":
+		action = "lock"
+	elif args.size() >= 2:
+		action = args[1]
+	if d == null or not (action in ["open", "lock"]):
+		_out("usage: door <reader> open|lock   (names from `nmap`)", "red"); return
+	if action == "open":
+		if not d.reader_live():
+			_out("%s: reader is dead, no power to the strike" % _slug(d.label), "red"); return
+		d.unlocked = true
+		game.add_trace(15.0, "Door forced: %s" % d.label)
+		_out("%s open" % _slug(d.label), "green")
+	else:
+		d.unlocked = false
+		_out("%s re-secured" % _slug(d.label), "dim")
 
 
-func _cmd_lock(args: Array) -> void:
-	var d := _door(args)
-	if d == null:
-		_out("usage: lock <door>", "red"); return
-	d.unlocked = false
-	_out("%s re-secured" % _slug(d.label), "dim")
-
+# ------------------------------------------------------------------ power / relay / drones
 
 func _cmd_power(args: Array) -> void:
 	if not admin:
-		_out("power: admin session required", "red"); return
+		_out("power: needs an admin session", "red"); return
 	if args.size() < 2 or not (args[1] in ["on", "off"]):
 		_out("usage: power <zone> on|off", "red"); return
 	var on: bool = args[1] == "on"
+	var zone_tok: String = args[0].trim_prefix("plc-")
 	var hit := false
 	for dv in game.facility.devices:
-		if dv.kind == Device.Kind.BREAKER and _slug(dv.zone).begins_with(args[0]):
+		if dv.kind == Device.Kind.BREAKER and _slug(dv.zone).begins_with(zone_tok):
 			dv.sabotaged = not on
 			game.set_zone_power(dv, on)
 			hit = true
 	if hit:
 		game.add_trace(10.0, "Power circuit toggled")
-		_out("power %s: %s" % [args[0], "on" if on else "off"], "green" if on else "amber")
+		_out("power %s: %s" % [zone_tok, "on" if on else "off"], "green" if on else "amber")
 	else:
 		_out("no such zone", "red")
 
 
 func _cmd_relay(args: Array) -> void:
 	if args.is_empty() or not (args[0] in ["off", "on", "down", "up"]):
-		_out("usage: relay off|on", "red"); return
+		_out("usage: relay down|up", "red"); return
 	var off: bool = args[0] in ["off", "down"]
 	var relay: Device = null
 	for dv in game.facility.devices:
@@ -296,7 +400,7 @@ func _cmd_relay(args: Array) -> void:
 		relay.sabotaged = true
 		game.jam_comms(relay)
 		game.add_trace(20.0, "Relay link dropped")
-		_out("radio net down — alarms go nowhere now", "green")
+		_out("radio relay jammed — alarms go nowhere now", "green")
 	elif not off and game.comms_down:
 		relay.sabotaged = false
 		game.comms_restored(relay)
@@ -309,7 +413,7 @@ func _cmd_drones(args: Array) -> void:
 	if args.is_empty() or args[0] != "ground":
 		_out("usage: drones ground", "red"); return
 	if not admin:
-		_out("drones: admin session required", "red"); return
+		_out("drones: needs an admin session", "red"); return
 	for dr in game.facility.drones:
 		if dr.scanning():
 			dr.mode = Drone.Mode.RETURN
@@ -321,44 +425,45 @@ func _cmd_drones(args: Array) -> void:
 
 func _catalog() -> Array[Dictionary]:
 	return [
-		{"usage": "ls", "verb": "ls", "help": "list cameras, doors, zones", "admin": false},
-		{"usage": "cam <n>", "verb": "cam", "help": "watch a camera feed", "admin": false},
-		{"usage": "loop <n>", "verb": "loop", "help": "loop a feed (+12)", "admin": false},
-		{"usage": "kill <n>", "verb": "kill", "help": "disable a camera (+25)", "admin": false},
-		{"usage": "restore <n>", "verb": "restore", "help": "bring a camera back", "admin": false},
-		{"usage": "unlock <door>", "verb": "unlock", "help": "release a door lock (+15)", "admin": false},
-		{"usage": "lock <door>", "verb": "lock", "help": "re-secure a door", "admin": false},
-		{"usage": "relay off", "verb": "relay", "help": "jam guard radio (+20)", "admin": false},
-		{"usage": "blackout", "verb": "blackout", "help": "all cameras off (+40)", "admin": true},
+		{"usage": "nmap [name]", "verb": "nmap", "help": "list the props, or look at one", "admin": false},
+		{"usage": "cam <cam>", "verb": "cam", "help": "watch a camera feed", "admin": false},
+		{"usage": "loop <cam>", "verb": "loop", "help": "hold a feed on a loop (+12)", "admin": false},
+		{"usage": "kill <cam>", "verb": "kill", "help": "drop a camera (+25)", "admin": false},
+		{"usage": "restore <cam>", "verb": "restore", "help": "bring a camera back", "admin": false},
+		{"usage": "door <r> open|lock", "verb": "door", "help": "work a door reader (+15)", "admin": false},
+		{"usage": "relay down", "verb": "relay", "help": "jam the guard radio (+20)", "admin": false},
 		{"usage": "power <zone> off", "verb": "power", "help": "cut a zone's power (+10)", "admin": true},
+		{"usage": "blackout", "verb": "blackout", "help": "all cameras off (+40)", "admin": true},
 		{"usage": "drones ground", "verb": "drones", "help": "recall the drones (+15)", "admin": true},
 		{"usage": "help", "verb": "help", "help": "this list", "admin": false},
-		{"usage": "logout", "verb": "logout", "help": "disconnect", "admin": false},
+		{"usage": "exit", "verb": "logout", "help": "unclip and disconnect", "admin": false},
 	]
 
 
 func _verbs() -> Array:
-	var out: Array = []
+	var out: Array = ["nmap"]
 	for c in _catalog():
-		if not c.admin or admin:
+		if (not c.admin or admin) and c.verb != "nmap":
 			out.append(c.verb)
 	return out
 
 
 func _targets(verb: String) -> Array:
 	match verb:
-		"cam", "watch", "loop", "kill", "restore":
-			return range(1, game.cameras().size() + 1).map(func(i: int) -> String: return str(i))
-		"unlock", "lock", "door":
+		"nmap", "scan":
+			return hosts().map(func(h: Dictionary) -> String: return h.host)
+		"cam", "watch", "loop", "replay", "kill", "disable", "restore":
+			return game.cameras().map(func(c: Device) -> String: return _slug(c.label))
+		"door", "unlock", "lock":
 			return game.facility.doors.map(func(d: Door) -> String: return _slug(d.label))
-		"power":
+		"power", "breaker":
 			var z := {}
 			for l in game.facility.lamps:
 				z[_slug(l.zone)] = true
 			return z.keys()
-		"relay":
-			return ["off", "on"]
-		"drones":
+		"relay", "jam":
+			return ["down", "up"]
+		"drones", "drone":
 			return ["ground"]
 	return []
 

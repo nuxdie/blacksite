@@ -28,6 +28,7 @@ var _fx: ColorRect
 var _fx_mat: ShaderMaterial
 var _flash_rect: ColorRect
 var _overlay: Control
+var _map: Control
 var _damage := 0.0
 var _dmg_dirs: Array[Dictionary] = []
 var _subs: Array[Dictionary] = []
@@ -101,6 +102,12 @@ func _ready() -> void:
 	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_overlay.draw.connect(_draw_overlay)
 	add_child(_overlay)
+	_map = Control.new()
+	_map.clip_contents = true
+	_map.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_map.visible = false
+	_map.draw.connect(_draw_map)
+	add_child(_map)
 	visible = false
 
 
@@ -212,6 +219,13 @@ func refresh(dt: float) -> void:
 	_fx_mat.set_shader_parameter("alert", _alert if p.alive else 0.0)
 	_fx_mat.set_shader_parameter("alert_red", _alert_red)
 	_flash_rect.color.a = minf(1.0, flash)
+	var show_map := p.alive and not game.tablet_access and not p.is_scoped()
+	_map.visible = show_map
+	if show_map:
+		var ms := 196.0
+		_map.position = Vector2(_overlay.size.x - M - ms, M)
+		_map.size = Vector2(ms, ms)
+		_map.queue_redraw()
 	_overlay.queue_redraw()
 
 
@@ -387,7 +401,7 @@ func _draw_heading(size: Vector2) -> void:
 		pts.append(ctr + Vector2(cos(a), sin(a)) * R)
 	_overlay.draw_polyline(pts, Color(INK, 0.22), 1.0)
 	for deg in range(0, 360, 15):
-		var rel := angle_difference(heading, deg_to_rad(deg))
+		var rel := angle_difference(deg_to_rad(deg), heading)
 		if absf(rel) > span / 2.0:
 			continue
 		var k := rel / (span / 2.0)
@@ -404,7 +418,7 @@ func _draw_heading(size: Vector2) -> void:
 	_overlay.draw_colored_polygon(PackedVector2Array([Vector2(cx, top + 4), Vector2(cx - 4, top + 11), Vector2(cx + 4, top + 11)]), INK)
 	# objective: a diamond riding under the arc, a chevron when it is off the tape
 	var tgt := game.objective_target()
-	var orel := angle_difference(heading, atan2(tgt.x - p.global_position.x, tgt.z - p.global_position.z))
+	var orel := angle_difference(atan2(tgt.x - p.global_position.x, tgt.z - p.global_position.z), heading)
 	var ok := clampf(orel / (span / 2.0), -1.0, 1.0)
 	var oa := -PI / 2.0 + ok * half_a
 	var odir := Vector2(cos(oa), sin(oa))
@@ -432,6 +446,65 @@ func _draw_heading(size: Vector2) -> void:
 		_micro(Vector2(cx, y + 28), "COPYING  %d%%" % roundi(lap.copy_progress * 100.0), DIM, HORIZONTAL_ALIGNMENT_CENTER)
 	elif lap and lap.copy_state == "done" and game.mission == "infil":
 		_micro(Vector2(cx, y + 20), "COPY COMPLETE", GREEN, HORIZONTAL_ALIGNMENT_CENTER)
+
+
+# --- top right: a heading-up plan of the compound, oriented to your view (forward is up)
+
+func _draw_map() -> void:
+	var p := game.player
+	var ms := _map.size.x
+	var center := Vector2(ms, ms) * 0.5
+	_map.draw_rect(Rect2(0, 0, ms, ms), Color(0.02, 0.03, 0.05, 0.42))
+	_map.draw_rect(Rect2(0, 0, ms, ms), Color(INK, 0.12), false, 1.0)
+	var view := 42.0
+	var scale := (ms * 0.5) / view
+	var cy := cos(p.yaw)
+	var sy := sin(p.yaw)
+	var px := p.global_position.x
+	var pz := p.global_position.z
+	# world x-z to map: rotate so the player's forward points up and their right points right
+	var w2m := func(wx: float, wz: float) -> Vector2:
+		var dx := wx - px
+		var dz := wz - pz
+		return center + Vector2(dx * cy - dz * sy, dx * sy + dz * cy) * scale
+	# structure
+	for rr: Rect2 in game.facility.footprints:
+		_map.draw_colored_polygon(PackedVector2Array([
+			w2m.call(rr.position.x, rr.position.y),
+			w2m.call(rr.position.x + rr.size.x, rr.position.y),
+			w2m.call(rr.position.x + rr.size.x, rr.position.y + rr.size.y),
+			w2m.call(rr.position.x, rr.position.y + rr.size.y)]), Color(INK, 0.17))
+	# doors
+	for d in game.facility.doors:
+		_map.draw_circle(w2m.call(d.global_position.x, d.global_position.z), 2.0, GREEN if not d.secured() else Color(INK, 0.7))
+	# cameras
+	for dv in game.cameras():
+		if dv.destroyed:
+			continue
+		var col := DIM
+		if dv.camera_live():
+			col = RED if dv.alarm else (AMBER if dv.aware > 0.1 else GREEN)
+		var cc: Vector2 = w2m.call(dv.global_position.x, dv.global_position.z)
+		_map.draw_rect(Rect2(cc - Vector2(2, 2), Vector2(4, 4)), col)
+	# tracked guards, fading like their world markers
+	for s in game.soldiers:
+		if not s.alive or not s.tagged:
+			continue
+		var age := game.time - s.tag_seen_t
+		var a := clampf(1.0 - (age - 10.0) / 10.0, 0.0, 0.85)
+		if a <= 0.0:
+			continue
+		var gc := RED if s.state == Soldier.State.COMBAT else (AMBER if s.state == Soldier.State.SUSPICIOUS else INK)
+		_map.draw_circle(w2m.call(s.tag_seen.x, s.tag_seen.z), 2.4, Color(gc, a))
+	# objective
+	var tgt := game.objective_target()
+	var op: Vector2 = w2m.call(tgt.x, tgt.z)
+	_map.draw_colored_polygon(PackedVector2Array([op + Vector2(0, -4), op + Vector2(4, 0), op + Vector2(0, 4), op + Vector2(-4, 0)]), AMBER)
+	# the operator, fixed at centre, facing up
+	_map.draw_colored_polygon(PackedVector2Array([center + Vector2(0, -6.5), center + Vector2(4.5, 4.5), center + Vector2(-4.5, 4.5)]), Color(1, 1, 1, 0.95))
+	# a mark for north, swinging with your heading
+	var nd := Vector2(-sy, cy)
+	_map.draw_string(_f_micro, center + nd * (ms * 0.42) + Vector2(-4, 5), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(INK, 0.55))
 
 
 # --- the attention line: are you being noticed, and why
@@ -928,11 +1001,18 @@ func _draw_tablet(size: Vector2) -> void:
 	var w := minf(1060.0, size.x - 70.0)
 	var h := w * 0.52
 	var r := Rect2((size.x - w) * 0.5, (size.y - h) * 0.5 - 40.0, w, h)
-	_overlay.draw_rect(r.grow(16), Style.BG)
-	_overlay.draw_rect(r.grow(16), Color(0.3, 0.9, 0.6, 0.16), false, 1.0)
 	var feed_w := 376.0
 	var con_w := w - feed_w - 28.0
-	var header := "SECURITY NETWORK  //  %s  //  %s" % [NetConsole._slug(game.tablet_access.label), "ADMIN" if game.tablet_admin else "GUEST"]
+	var fx := r.position.x + con_w + 20.0
+	var feed := Rect2(fx, r.position.y, feed_w, feed_w * 0.56)
+	# the camera feed is a real TextureRect drawn underneath this overlay, so paint the panel
+	# background around it (not over it) or the live image would be hidden
+	var panel := r.grow(16)
+	_overlay.draw_rect(Rect2(panel.position, Vector2(feed.position.x - panel.position.x, panel.size.y)), Style.BG)
+	_overlay.draw_rect(Rect2(Vector2(feed.position.x, panel.position.y), Vector2(panel.end.x - feed.position.x, feed.position.y - panel.position.y)), Style.BG)
+	_overlay.draw_rect(Rect2(Vector2(feed.position.x, feed.end.y), Vector2(panel.end.x - feed.position.x, panel.end.y - feed.end.y)), Style.BG)
+	_overlay.draw_rect(panel, Color(0.3, 0.9, 0.6, 0.16), false, 1.0)
+	var header := "OPERATOR DECK  //  TAP %s  //  %s  //  %s" % [NetConsole._slug(game.tablet_access.label), NetConsole.SUBNET, "ADMIN" if game.tablet_admin else "GUEST"]
 	_micro(r.position + Vector2(0, -24), header, GREEN)
 	var mono := _f_label
 	var line_h := 17.0
@@ -954,7 +1034,7 @@ func _draw_tablet(size: Vector2) -> void:
 		_overlay.draw_rect(Rect2(cx, iy + 7, 7, 15), Color(GREEN, 0.8))
 	var sugg := con.suggestions()
 	var py := iy + 34.0
-	_micro(Vector2(r.position.x + 4, py + 10), "AVAILABLE", DIM)
+	_micro(Vector2(r.position.x + 4, py + 10), "COMMANDS", DIM)
 	var sx := r.position.x + 4
 	var swy := py + 28.0
 	for item: Dictionary in sugg.slice(0, 10):
@@ -969,8 +1049,6 @@ func _draw_tablet(size: Vector2) -> void:
 			var ox := mono.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 10.0
 			_text(Vector2(sx + 5 + ox, swy), item.help, 12, DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
 		sx += tw
-	var fx := r.position.x + con_w + 20.0
-	var feed := Rect2(fx, r.position.y, feed_w, feed_w * 0.56)
 	_feed_rect.position = feed.position
 	_feed_rect.size = feed.size
 	_overlay.draw_rect(feed, Color(1, 1, 1, 0.15), false, 1.0)

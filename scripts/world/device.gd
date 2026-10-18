@@ -273,7 +273,7 @@ func use_label(game: Game) -> String:
 		Kind.ACCESS:
 			if locked > 0.0:
 				return "Port locked  ·  %ds" % ceili(locked)
-			return "Log in with badge" if game.has_badge else "Bypass security  ·  leaves a trace"
+			return "Log in with badge" if game.has_badge else "Clip the implant  ·  guest shell, leaves a trace"
 		Kind.RELAY:
 			return "" if sabotaged else "Sabotage relay"
 		Kind.BREAKER:
