@@ -204,7 +204,7 @@ func refresh(dt: float) -> void:
 		red = 1.0 if att[0][1] == RED else 0.0
 	_alert = move_toward(_alert, want, dt * (2.0 if want > _alert else 0.6))
 	_alert_red = move_toward(_alert_red, red, dt * 2.5)
-	var open := game.tablet_access != null
+	var open := game.tablet_access != null and game.console.phase == NetConsole.Phase.SHELL
 	_feed_rect.visible = open
 	_feed_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if open else SubViewport.UPDATE_DISABLED
 	if open:
@@ -1012,8 +1012,10 @@ func _draw_tablet(size: Vector2) -> void:
 	_overlay.draw_rect(Rect2(Vector2(feed.position.x, panel.position.y), Vector2(panel.end.x - feed.position.x, feed.position.y - panel.position.y)), Style.BG)
 	_overlay.draw_rect(Rect2(Vector2(feed.position.x, feed.end.y), Vector2(panel.end.x - feed.position.x, panel.end.y - feed.end.y)), Style.BG)
 	_overlay.draw_rect(panel, Color(0.3, 0.9, 0.6, 0.16), false, 1.0)
-	var header := "OPERATOR DECK  //  TAP %s  //  %s  //  %s" % [NetConsole._slug(game.tablet_access.label), NetConsole.SUBNET, "ADMIN" if game.tablet_admin else "GUEST"]
-	_micro(r.position + Vector2(0, -24), header, GREEN)
+	var logging_in := con.phase == NetConsole.Phase.LOGIN
+	var state: String = {"badge": "BADGE LOGIN", "creds": "COVER LOGIN", "brute": "BRUTE FORCE"}.get(con.mode, "") if logging_in else ("ADMIN" if game.tablet_admin else "USER")
+	var header := "OPERATOR NETTOP  //  %s  //  %s  //  %s" % [NetConsole._slug(game.tablet_access.label), NetConsole.SUBNET, state]
+	_micro(r.position + Vector2(0, -24), header, AMBER if logging_in else GREEN)
 	var mono := _f_label
 	var line_h := 17.0
 	var pal_h := 86.0
@@ -1025,6 +1027,9 @@ func _draw_tablet(size: Vector2) -> void:
 		ly += line_h
 	var iy := log_bottom + 6.0
 	_rule(Vector2(r.position.x, iy), Vector2(r.position.x + con_w, iy), Color(1, 1, 1, 0.1))
+	if logging_in:
+		_draw_login(con, r, con_w, iy, feed, fx, feed_w, mono)
+		return
 	var prompt := NetConsole.PROMPT + ":~$ "
 	_text(Vector2(r.position.x + 4, iy + 20), prompt, 13, GREEN, HORIZONTAL_ALIGNMENT_LEFT, mono)
 	var pw := mono.get_string_size(prompt, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
@@ -1065,6 +1070,35 @@ func _draw_tablet(size: Vector2) -> void:
 	if _trace_t > 0.0:
 		_micro(Vector2(fx, ty + 16), _trace_reason, Color(RED, minf(1.0, _trace_t)))
 	_micro(Vector2(fx, feed.end.y + 48.0), "ESC DISCONNECT  ·  TAB COMPLETE  ·  ↑ HISTORY", DIM)
+
+
+## The nettop working the login: a progress bar where the prompt will be, the attempt counter
+## where the feed will be, and nothing to type yet.
+func _draw_login(con: NetConsole, r: Rect2, con_w: float, iy: float, feed: Rect2, fx: float, feed_w: float, mono: Font) -> void:
+	var k := con.login_progress()
+	var what: String = {"badge": "PRESENTING BADGE", "creds": "TRYING THE COVER LOGIN", "brute": "BRUTE-FORCING  %d / %d" % [con.attempt_i, con.attempts.size()]}.get(con.mode, "")
+	_micro(Vector2(r.position.x + 4, iy + 20), what, AMBER)
+	var bar := Rect2(r.position.x + 4, iy + 30, con_w - 8, 4)
+	_overlay.draw_rect(bar, Color(1, 1, 1, 0.1))
+	_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, 4)), AMBER)
+	if con.mode == "brute":
+		var left := maxf(0.0, con.login_dur - con.login_t)
+		_micro(Vector2(r.position.x + 4, iy + 54), "%d s  ·  trace climbs with every miss" % ceili(left), DIM)
+	_overlay.draw_rect(feed, Color(1, 1, 1, 0.15), false, 1.0)
+	_text(feed.position + Vector2(8, 16), "NO SESSION", 12, Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_LEFT, mono)
+	var big := "%d" % roundi(k * 100.0) + "%"
+	if con.mode == "brute":
+		big = "%d" % con.attempt_i
+	_text(feed.get_center() + Vector2(0, 14), big, 40, AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_label)
+	_micro(feed.get_center() + Vector2(0, 40), "ATTEMPTS" if con.mode == "brute" else "HANDSHAKE", DIM, HORIZONTAL_ALIGNMENT_CENTER)
+	var ty := feed.end.y + 22.0
+	_micro(Vector2(fx, ty - 6), "TRACE", DIM)
+	var tbar := Rect2(fx + 54, ty - 13, feed_w - 54, 4)
+	_overlay.draw_rect(tbar, Color(1, 1, 1, 0.1))
+	_overlay.draw_rect(Rect2(tbar.position, Vector2(tbar.size.x * clampf(game.trace / 100.0, 0.0, 1.0), 4)), RED if game.trace > 70.0 else AMBER)
+	if _trace_t > 0.0:
+		_micro(Vector2(fx, ty + 16), _trace_reason, Color(RED, minf(1.0, _trace_t)))
+	_micro(Vector2(fx, feed.end.y + 60.0), "ESC PULL THE CABLE", DIM)
 
 
 func _tag_color(tag: String) -> Color:

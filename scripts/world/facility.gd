@@ -579,9 +579,18 @@ func _layout() -> void:
 	add_pickup(Pickup.Kind.AMMO, Vector3(40.5, 4.2, 15))
 	box(-13.6, 0, -18.95, -11.4, 0.8, -18.35, "wood")
 	# security network: three access points and five cameras on the same wire
-	_device(Device.make(Device.Kind.ACCESS, "SECURITY TERMINAL", Vector3(-12.5, 0.8, -18.6), PI))
-	_device(Device.make(Device.Kind.ACCESS, "JUNCTION BOX", Vector3(32.0, 1.3, -20.34), 0.0))
-	_device(Device.make(Device.Kind.ACCESS, "SERVER CABINET", Vector3(-29.35, 0, 30.6), -PI / 2))
+	# every port has a factory login the nettop's brute-force will find; the outdoor box is
+	# screwed shut, and the installer wrote its login inside the cover
+	var term := Device.make(Device.Kind.ACCESS, "SECURITY TERMINAL", Vector3(-12.5, 0.8, -18.6), PI)
+	term.password = "admin:Welcome1"
+	_device(term)
+	var junction := Device.make(Device.Kind.ACCESS, "JUNCTION BOX", Vector3(32.0, 1.3, -20.34), 0.0)
+	junction.capped = true
+	junction.password = "admin:7F3K-20Q1"
+	_device(junction)
+	var cabinet := Device.make(Device.Kind.ACCESS, "SERVER CABINET", Vector3(-29.35, 0, 30.6), -PI / 2)
+	cabinet.password = "root:changeme"
+	_device(cabinet)
 	solid(-29.8, 0, 30.3, -28.95, 2.0, 30.9)
 	_device(Device.camera(1, Vector3(9.6, 6.0, -12.0), PI / 2, 0.7))
 	_device(Device.camera(2, Vector3(-14.0, 3.0, -19.3), 0.3, 0.8))

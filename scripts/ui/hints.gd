@@ -22,7 +22,9 @@ var defs: Array[Dictionary] = [
 	{"id": "tracked", "keys": [], "text": "Guards you've seen stay tracked: a hollow marker shows where you last saw them", "trigger": "tracked_hidden", "info": true},
 	{"id": "lights", "keys": [], "text": "You're lit up. Lamps can be shot out", "trigger": "lit_near_guards", "info": true},
 	{"id": "cameras", "keys": [], "text": "Cameras are wired to a security network — get to an access point to deal with them", "trigger": "camera_in_view", "info": true},
-	{"id": "network", "keys": [], "text": "Your deck opens a shell on the access port. Run `nmap` to list what's wired in, then address each prop by name — `help` and the palette show the rest", "trigger": "access_near", "info": true},
+	{"id": "cover", "keys": [], "text": "Outdoor boxes are screwed shut. Installers tend to write the factory login inside the cover", "trigger": "capped_near", "info": true},
+	{"id": "network", "keys": [], "text": "Cable the nettop to the port and it brute-forces the factory login — slow, and every miss is logged. A badge or the cover's login gets in clean", "trigger": "access_near", "info": true},
+	{"id": "shell", "keys": [], "text": "You're in. Run `nmap` to list what's wired in, then address each prop by name — `help` and the palette show the rest", "trigger": "shell_open", "info": true},
 	{"id": "badge", "keys": [], "text": "Badges open doors at their access level. A security badge also logs into the cameras without a trace", "trigger": "badge", "info": true},
 	{"id": "multitool", "keys": ["interact"], "text": "Hold to clone a guard's badge, or splice a locked reader with your multitool", "trigger": "tool_available"},
 	{"id": "drone", "keys": [], "text": "A patrol drone scans from above — light cones give it away. Shoot it down, or cut comms to ground it", "trigger": "drone_seen", "info": true},
@@ -138,7 +140,11 @@ func _condition(trigger: String) -> bool:
 					return true
 			return false
 		"access_near":
-			return game.use_target != null and game.use_target.kind == Device.Kind.ACCESS
+			return game.use_target != null and game.use_target.kind == Device.Kind.ACCESS and not (game.use_target.capped and not game.use_target.cover_open)
+		"capped_near":
+			return game.use_target != null and game.use_target.kind == Device.Kind.ACCESS and game.use_target.capped and not game.use_target.cover_open
+		"shell_open":
+			return game.tablet_access != null and game.console.phase == NetConsole.Phase.SHELL
 		"badge":
 			return _events.has("badge")
 		"tool_available":

@@ -28,8 +28,28 @@ var disabled := false
 var destroyed := false
 var sees_player := false
 
-# access points
+# access points: the port is reached with the nettop and a cable. Outdoor boxes are screwed shut,
+# and the installer wrote the box's default login on the inside of the cover.
 var locked := 0.0
+var capped := false
+var cover_open := false
+var creds_known := false
+## The login the brute-force ends up finding ("user:password"); printed on the cover when capped.
+var password := "admin:admin"
+var plugged := false
+var _cover_t := 0.0
+var _plug_t := 0.0
+var _read_t := 0.0
+var _cover: Node3D
+var _screws: Array[MeshInstance3D] = []
+var _sticker: Node3D
+var _port := Vector3.ZERO
+var _nettop: Node3D
+var _nettop_rest := Vector3.ZERO
+var _nettop_from := Vector3.ZERO
+var _act_mat: StandardMaterial3D
+var _link_mat: StandardMaterial3D
+var _cable: Array[MeshInstance3D] = []
 
 # relay / breaker
 var sabotaged := false
@@ -100,6 +120,11 @@ func reset() -> void:
 	repair_pending = false
 	copy_state = "idle"
 	copy_progress = 0.0
+	if kind == Kind.ACCESS:
+		plug(false)
+		_set_cover(false)
+		creds_known = false
+		_read_t = 0.0
 	if _cone:
 		_cone.visible = true
 	if _lens_mat:
@@ -116,7 +141,7 @@ func reset() -> void:
 
 func save_state() -> Dictionary:
 	return {"looped": looped, "disabled": disabled, "destroyed": destroyed, "locked": locked, "sabotaged": sabotaged,
-		"copy_state": copy_state, "copy_progress": copy_progress, "yaw": _yaw}
+		"copy_state": copy_state, "copy_progress": copy_progress, "yaw": _yaw, "cover_open": cover_open, "creds_known": creds_known}
 
 
 func load_state(d: Dictionary) -> void:
@@ -129,6 +154,11 @@ func load_state(d: Dictionary) -> void:
 	copy_state = d.copy_state
 	copy_progress = d.copy_progress
 	_yaw = d.yaw
+	if kind == Kind.ACCESS:
+		creds_known = d.get("creds_known", false)
+		if d.get("cover_open", false):
+			_set_cover(true)
+			_cover_t = 1.0
 	if disabled or destroyed:
 		_stand_down(true)
 	if destroyed and head:
@@ -188,21 +218,159 @@ func _build_camera() -> void:
 
 func _build_access() -> void:
 	var grey := Mats.plain(Color("5a5e62"), 0.55, 0.5)
+	var socket := Mats.plain(Color("101114"), 0.5, 0.2)
 	if label == "SECURITY TERMINAL":
 		_box(self, Vector3(0.54, 0.36, 0.05), Mats.plain(Color("1a1b1d"), 0.6), Vector3(0, 0.24, 0))
 		_led_mat = Mats.emissive(Color("4ad0ff"), 1.4)
 		_box(self, Vector3(0.5, 0.32, 0.01), _led_mat, Vector3(0, 0.24, -0.03))
 		_box(self, Vector3(0.45, 0.02, 0.16), Mats.plain(Color("2a2c2e"), 0.6), Vector3(0, 0.01, -0.18))
+		# a network port on the monitor's edge; the nettop goes on the desk beside it
+		_box(self, Vector3(0.02, 0.03, 0.04), socket, Vector3(0.28, 0.14, 0.0))
+		_port = Vector3(0.29, 0.14, 0.0)
+		_nettop_rest = Vector3(0.5, 0.0, -0.1)
 	elif label == "SERVER CABINET":
 		_box(self, Vector3(0.6, 2.0, 0.8), Mats.plain(Color("1c1d20"), 0.5, 0.5), Vector3(0, 1.0, 0))
 		_led_mat = Mats.emissive(Color("40ff90"), 1.4)
 		for i in 8:
 			_box(self, Vector3(0.4, 0.02, 0.01), _led_mat, Vector3(0, 0.4 + i * 0.18, -0.405))
+		_box(self, Vector3(0.05, 0.03, 0.02), socket, Vector3(0.18, 1.0, -0.41))
+		_port = Vector3(0.18, 1.0, -0.42)
+		_nettop_rest = Vector3(0.1, 0.0, -0.65)
 	else:
+		# a wall box: the body, a dark panel with the port and status light, and (if capped) a
+		# screwed-on cover that hinges down from its bottom edge
 		_box(self, Vector3(0.5, 0.6, 0.18), grey, Vector3(0, 0, 0))
+		_box(self, Vector3(0.44, 0.54, 0.01), Mats.plain(Color("26282b"), 0.6, 0.3), Vector3(0, 0, -0.088))
 		_led_mat = Mats.emissive(Color("40ff90"), 1.4)
-		_box(self, Vector3(0.04, 0.04, 0.01), _led_mat, Vector3(0.17, 0.22, -0.095))
-		_box(self, Vector3(0.3, 0.03, 0.01), Mats.plain(Color("c8a640"), 0.7), Vector3(0, -0.2, -0.095))
+		_box(self, Vector3(0.04, 0.04, 0.01), _led_mat, Vector3(0.17, 0.22, -0.096))
+		_box(self, Vector3(0.05, 0.035, 0.02), socket, Vector3(-0.1, 0.04, -0.1))
+		_port = Vector3(-0.1, 0.04, -0.11)
+		_nettop_rest = Vector3(0.0, -1.275, -0.3)
+		if capped:
+			_build_cover()
+		else:
+			_box(self, Vector3(0.3, 0.03, 0.01), Mats.plain(Color("c8a640"), 0.7), Vector3(0, -0.2, -0.096))
+	_build_nettop()
+
+
+## The cover plate: four screws on the outside, the installer's label on the inside.
+func _build_cover() -> void:
+	_cover = Node3D.new()
+	_cover.position = Vector3(0, -0.3, -0.1)
+	add_child(_cover)
+	var plate := Mats.plain(Color("63676b"), 0.5, 0.5)
+	_box(_cover, Vector3(0.5, 0.6, 0.02), plate, Vector3(0, 0.3, -0.01))
+	_box(_cover, Vector3(0.3, 0.03, 0.01), Mats.plain(Color("c8a640"), 0.7), Vector3(0, 0.1, -0.024))
+	var steel := Mats.plain(Color("9a9ea2"), 0.35, 0.8)
+	for sx: float in [-0.21, 0.21]:
+		for sy: float in [0.04, 0.56]:
+			var s := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.013
+			cm.bottom_radius = 0.013
+			cm.height = 0.012
+			s.mesh = cm
+			s.material_override = steel
+			s.rotation.x = PI / 2
+			s.position = Vector3(sx, sy, -0.024)
+			_cover.add_child(s)
+			_screws.append(s)
+	# the sticker, on the face that touches the box while the cover is shut
+	_sticker = Node3D.new()
+	_sticker.position = Vector3(0, 0.4, 0.004)
+	# upside down while shut, so it reads the right way up once the cover hangs
+	_sticker.rotation.z = PI
+	_cover.add_child(_sticker)
+	_box(_sticker, Vector3(0.3, 0.1, 0.004), Mats.emissive(Color("d8d4c4"), 0.25), Vector3.ZERO)
+	var parts := password.split(":")
+	var txt := Label3D.new()
+	txt.text = "DEFAULT LOGIN\nuser %s   pass %s" % [parts[0], parts[1] if parts.size() > 1 else ""]
+	txt.font = Style.semibold
+	txt.font_size = 44
+	txt.pixel_size = 0.0006
+	txt.modulate = Color("1a1a1c")
+	txt.position = Vector3(0, 0, 0.0035)
+	txt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	txt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	txt.double_sided = false
+	_sticker.add_child(txt)
+
+
+## The operator's nettop: a palm-sized box with two lights, and the cable to the port.
+func _build_nettop() -> void:
+	_nettop = Node3D.new()
+	_nettop.visible = false
+	add_child(_nettop)
+	_box(_nettop, Vector3(0.22, 0.045, 0.17), Mats.plain(Color("1b1c1f"), 0.45, 0.4), Vector3(0, 0.0225, 0))
+	_box(_nettop, Vector3(0.2, 0.004, 0.15), Mats.plain(Color("2c2e32"), 0.3, 0.6), Vector3(0, 0.047, 0))
+	_box(_nettop, Vector3(0.2, 0.012, 0.03), Mats.plain(Color("0c0d0f"), 0.6), Vector3(0, 0.01, 0.085))
+	_link_mat = Mats.emissive(Color("40ff90"), 2.0)
+	_act_mat = Mats.emissive(Color("ffb84a"), 2.0)
+	_box(_nettop, Vector3(0.012, 0.006, 0.012), _link_mat, Vector3(-0.08, 0.05, -0.06))
+	_box(_nettop, Vector3(0.012, 0.006, 0.012), _act_mat, Vector3(-0.06, 0.05, -0.06))
+	var cable := Mats.plain(Color("1c1c1e"), 0.8, 0.0)
+	for i in 2:
+		var mi := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.004
+		cm.bottom_radius = 0.004
+		cm.height = 1.0
+		mi.mesh = cm
+		mi.material_override = cable
+		mi.visible = false
+		add_child(mi)
+		_cable.append(mi)
+
+
+func _set_cover(open: bool) -> void:
+	cover_open = open
+	if not _cover:
+		return
+	if not open:
+		_cover_t = 0.0
+		_cover.rotation.x = 0.0
+	for s in _screws:
+		s.visible = not open
+
+
+## Put the nettop down and run the cable to the port, or pack it up. `from` is where it comes from.
+func plug(on: bool, from := Vector3.ZERO) -> void:
+	plugged = on
+	if not _nettop:
+		return
+	_nettop.visible = on
+	_plug_t = 0.0
+	_link_mat.emission_energy_multiplier = 0.0
+	_act_mat.emission_energy_multiplier = 0.0
+	if on:
+		_nettop_from = to_local(from)
+		_nettop.position = _nettop_from
+	for c in _cable:
+		c.visible = false
+
+
+func _lay_cable(a: Vector3, b: Vector3) -> void:
+	var mid := (a + b) * 0.5 + Vector3.DOWN * minf(0.15, a.distance_to(b) * 0.12)
+	var pts := [a, mid, b]
+	for i in 2:
+		var p: Vector3 = pts[i]
+		var q: Vector3 = pts[i + 1]
+		var d := q - p
+		var len := d.length()
+		if len < 0.001:
+			continue
+		var y := d / len
+		var ref := Vector3.FORWARD if absf(y.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT
+		var x := y.cross(ref).normalized()
+		var z := x.cross(y)
+		var mi := _cable[i]
+		mi.transform = Transform3D(Basis(x, y * len, z), (p + q) * 0.5)
+		mi.visible = true
+
+
+## The sticker's spot in the world (only while the cover hangs open), for reading it.
+func sticker_pos() -> Vector3:
+	return _sticker.global_position if _sticker else global_position
 
 
 func _build_relay() -> void:
@@ -273,7 +441,13 @@ func use_label(game: Game) -> String:
 		Kind.ACCESS:
 			if locked > 0.0:
 				return "Port locked  ·  %ds" % ceili(locked)
-			return "Log in with badge" if game.has_badge else "Clip the implant  ·  guest shell, leaves a trace"
+			if capped and not cover_open:
+				return "Unscrew the cover"
+			if game.has_badge:
+				return "Connect the nettop  ·  badge login, clean"
+			if creds_known:
+				return "Connect the nettop  ·  login from the cover"
+			return "Connect the nettop  ·  brute-force the login, leaves a trace"
 		Kind.RELAY:
 			return "" if sabotaged else "Sabotage relay"
 		Kind.BREAKER:
@@ -287,13 +461,22 @@ func use_label(game: Game) -> String:
 	return ""
 
 
-func use_time(game: Game) -> float:
+func use_time(_game: Game) -> float:
 	match kind:
-		Kind.ACCESS: return 1.5 if game.has_badge else 15.0
+		Kind.ACCESS: return 5.0 if capped and not cover_open else 1.6
 		Kind.RELAY: return 6.0
 		Kind.BREAKER: return 1.0
 		Kind.VENT: return 2.5
 	return 0.8
+
+
+## The looping sound of working on this thing.
+func use_sound() -> String:
+	match kind:
+		Kind.VENT: return "vent_loop"
+		Kind.RELAY: return "relay_loop"
+		Kind.ACCESS: return "vent_loop" if capped and not cover_open else "work_loop"
+	return "work_loop"
 
 
 func can_use(game: Game) -> bool:
@@ -318,7 +501,11 @@ func on_used(game: Game) -> void:
 			_set_grille(false)
 			Sfx.play_at("impact_metal", global_position, -10.0)
 		Kind.ACCESS:
-			game.open_tablet(self, not game.has_badge)
+			if capped and not cover_open:
+				_set_cover(true)
+				Sfx.play_at("impact_metal", global_position, -14.0)
+			else:
+				game.open_tablet(self)
 		Kind.RELAY:
 			sabotaged = true
 			_led_mat.emission_energy_multiplier = 0.0
@@ -409,6 +596,7 @@ func tick(dt: float, game: Game) -> void:
 	if kind == Kind.ACCESS:
 		locked = maxf(0.0, locked - dt)
 		_led_mat.emission = Color("ff4a3a") if locked > 0.0 else (Color("4ad0ff") if label == "SECURITY TERMINAL" else Color("40ff90"))
+		_tick_access(dt, game)
 		return
 	if kind == Kind.LAPTOP:
 		if copy_state == "copying":
@@ -477,6 +665,41 @@ func tick(dt: float, game: Game) -> void:
 		c = Color("ffb84a")
 	_lens_mat.emission = c
 	_cone.light_color = c.lerp(Color.WHITE, 0.6)
+
+
+## Screws back out while the cover is being worked on, the cover swings down and hangs, the
+## sticker is read by looking at it, and the nettop comes out of the pack and gets cabled up.
+func _tick_access(dt: float, game: Game) -> void:
+	if _cover:
+		if not cover_open:
+			var prog: float = game.use_progress.get(self, 0.0) if game.use_target == self else 0.0
+			for i in _screws.size():
+				_screws[i].visible = prog < (i + 1) / 4.0
+				_screws[i].position.z = -0.024 - 0.02 * clampf(prog * 4.0 - i, 0.0, 1.0)
+		else:
+			_cover_t = minf(1.0, _cover_t + dt / 0.7)
+			var k := 1.0 - pow(1.0 - _cover_t, 3.0)
+			_cover.rotation.x = -deg_to_rad(165.0) * k
+			if not creds_known and _cover_t >= 1.0:
+				var to := sticker_pos() - game.player.eye_pos()
+				if to.length() < 2.4 and to.normalized().dot(game.player.view_dir()) > 0.9:
+					_read_t += dt
+					if _read_t > 0.5:
+						creds_known = true
+						game.creds_read(self)
+	if plugged:
+		_plug_t = minf(1.0, _plug_t + dt / 0.6)
+		var k2 := 1.0 - pow(1.0 - _plug_t, 2.0)
+		_nettop.position = _nettop_from.lerp(_nettop_rest, k2) + Vector3.UP * sin(k2 * PI) * 0.12
+		if _plug_t >= 1.0:
+			if _link_mat.emission_energy_multiplier == 0.0:
+				_lay_cable(_nettop.position + Vector3(-0.06, 0.02, 0.085), _port)
+				Sfx.play_at("plug", to_global(_port), -10.0)
+			_link_mat.emission_energy_multiplier = 2.0
+			_act_mat.emission_energy_multiplier = 2.0 if (game.tablet_access == self and game.console.busy_blink(_blink)) else 0.2
+		else:
+			_link_mat.emission_energy_multiplier = 0.0
+			_act_mat.emission_energy_multiplier = 0.0
 
 
 func _can_see(game: Game, target: Vector3) -> bool:

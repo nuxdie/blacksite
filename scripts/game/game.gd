@@ -77,6 +77,9 @@ var tablet_cam := 0
 var use_target: Device = null
 var using := false
 var use_progress: Dictionary = {}
+## A finished hold has to be released before the next one starts (so popping a cover doesn't
+## roll straight into cabling the port).
+var _use_latch := false
 var _repairs: Array[Dictionary] = []
 var _body_scan_t := 0.0
 var hq := Command.new(self)
@@ -1046,8 +1049,10 @@ func _tick_devices(dt: float) -> void:
 	trace = maxf(0.0, trace - dt * (0.4 if tablet_access else 1.5))
 	use_target = find_use_target()
 	using = false
+	if not Input.is_action_pressed("interact"):
+		_use_latch = false
 	if use_target and player.active and use_target.can_use(self) and takedown_target() == null:
-		if Input.is_action_pressed("interact"):
+		if Input.is_action_pressed("interact") and not _use_latch:
 			using = true
 			var prog: float = use_progress.get(use_target, 0.0) + dt / use_target.use_time(self)
 			use_progress[use_target] = prog
@@ -1056,10 +1061,10 @@ func _tick_devices(dt: float) -> void:
 				var dv := use_target
 				use_target = null
 				using = false
+				_use_latch = true
 				dv.on_used(self)
 	if using and use_target:
-		var key: String = {Device.Kind.VENT: "vent_loop", Device.Kind.RELAY: "relay_loop", Device.Kind.ACCESS: "clone_loop"}.get(use_target.kind, "work_loop")
-		Sfx.loop_at("use", key, use_target.use_point(), -10.0, 1.5, 12.0)
+		Sfx.loop_at("use", use_target.use_sound(), use_target.use_point(), -10.0, 1.5, 12.0)
 	else:
 		Sfx.stop_loop("use")
 	if not using:
@@ -1070,7 +1075,7 @@ func _tick_devices(dt: float) -> void:
 		Sfx.stop_loop("tool")
 	player.hacking = using or not tool_target.is_empty()
 	if tablet_access:
-		_tick_tablet()
+		_tick_tablet(dt)
 	_tick_repairs()
 	_tick_laptop_watch()
 	# cameras that are still watching spot bodies too
@@ -1126,35 +1131,61 @@ func cameras() -> Array[Device]:
 
 # --- the tablet: a live session on the security network
 
-func open_tablet(access: Device, exploited: bool) -> void:
+## Put the nettop down at an access port and cable it up. The console logs itself in: a badge
+## is clean and gives admin, a login read off the cover is quick, and otherwise it brute-forces
+## the port's factory login, which takes a while and leaves failed logins in their records.
+func open_tablet(access: Device) -> void:
 	tablet_access = access
-	tablet_admin = has_badge
+	tablet_admin = false
 	tablet_cam = 0
 	player.in_tablet = true
-	stats.hacks += 1
 	console.game = self
-	console.open(access, has_badge)
-	if exploited:
-		add_trace(45.0, "Unauthorised login")
-	hud.learn("network")
+	var mode := "badge" if has_badge else ("creds" if access.creds_known else "brute")
+	console.open(access, mode)
+	access.plug(true, player.chest_pos())
+	Sfx.ui("ui_select", -8.0)
+
+
+## The login got through: the shell is open.
+func session_opened() -> void:
+	tablet_admin = console.admin
+	stats.hacks += 1
+	Sfx.stop_loop("brute")
 	Sfx.ui("term_login", -6.0)
+	hud.learn("network")
 
 
 func close_tablet() -> void:
 	if not tablet_access:
 		return
+	tablet_access.plug(false)
 	tablet_access = null
 	player.in_tablet = false
 	console.close()
+	Sfx.stop_loop("brute")
 	Sfx.ui("ui_move", -6.0)
 
 
-func _tick_tablet() -> void:
+func _tick_tablet(dt: float) -> void:
 	if not player.alive or player.global_position.distance_to(tablet_access.use_point()) > 2.6 or player.last_hit < 0.1:
 		close_tablet()
+		return
+	console.tick(dt)
+	if console.phase == NetConsole.Phase.LOGIN and console.mode == "brute":
+		Sfx.loop_at("brute", "brute_loop", tablet_access.use_point(), -14.0, 1.2, 8.0)
+	else:
+		Sfx.stop_loop("brute")
+
+
+## The login written inside a box's cover: the nettop will try it first from now on.
+func creds_read(dv: Device) -> void:
+	var parts := dv.password.split(":")
+	hud.toast("LOGIN ON THE COVER  ·  %s / %s" % [parts[0], parts[1] if parts.size() > 1 else ""], false)
+	Sfx.ui("badge_ok", -8.0)
 
 
 ## While connected, the terminal eats keyboard input: typed text goes to the command line.
+## During the login only Escape does anything: it pulls the cable.
 func tablet_input(event: InputEvent) -> bool:
 	if not tablet_access:
 		return false
@@ -1163,6 +1194,10 @@ func tablet_input(event: InputEvent) -> bool:
 	if not (event is InputEventKey) or not event.pressed:
 		return event is InputEventKey
 	var k := event as InputEventKey
+	if console.phase == NetConsole.Phase.LOGIN:
+		if k.keycode == KEY_ESCAPE:
+			close_tablet()
+		return true
 	match k.keycode:
 		KEY_ENTER, KEY_KP_ENTER:
 			console.submit()

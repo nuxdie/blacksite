@@ -132,6 +132,7 @@ func _defs() -> Dictionary:
 		"term_err": [_t("square", 300, 300, 0.12, 0.05), _t("square", 250, 250, 0.12, 0.05, 0.13)],
 		"term_trace": [_m(_t("square", 2200, 2200, 0.06, 0.05), {"hold": 0.7}), _m(_t("square", 2200, 2200, 0.06, 0.05, 0.12), {"hold": 0.7})],
 		"term_kick": [_t("square", 400, 200, 0.5, 0.12), _n(0.3, 0.15, "hp", 3000)],
+		"plug": [_n(0.025, 0.35, "bp", 2200, -1, 2.0), _t("square", 900, 600, 0.03, 0.05, 0.01), _n(0.04, 0.12, "bp", 1200, -1, 1.5, 0.04)],
 		# --- cues that exist only for you
 		"ui_move": [_t("tri", 1400, 1500, 0.03, 0.04)],
 		"ui_select": [_t("tri", 900, 1300, 0.07, 0.07)],
@@ -159,6 +160,7 @@ func _loop_defs() -> Dictionary:
 		"bed_notice": [[_m(_t("sine", 220, 220, 4.0, 0.05), {"trem": 0.5, "trem_d": 0.5}), _m(_t("sine", 331, 331, 4.0, 0.03), {"trem": 0.37, "trem_d": 0.6}), _m(_n(4.0, 0.012, "bp", 3000, -1, 2.0), {"trem": 0.7, "trem_d": 0.8})], 4.0],
 		"bed_hunt": [[_m(_t("sine", 55, 55, 4.0, 0.12), {"trem": 2.0, "trem_d": 0.8}), _m(_t("saw", 110, 110, 4.0, 0.03), {"trem": 2.0, "trem_d": 0.8}), _m(_t("sine", 82.4, 82.4, 4.0, 0.05), {"trem": 1.0, "trem_d": 0.5}), _m(_n(4.0, 0.06, "lp", 200), {"trem": 2.0, "trem_d": 0.8})], 4.0],
 		"term_hum": [[_t("saw", 60, 60, 1.0, 0.03), _n(1.0, 0.01, "bp", 8000, -1, 2.0)], 1.0],
+		"brute_loop": [[_m(_n(1.0, 0.05, "bp", 4500, -1, 3.0), {"trem": 14.0, "trem_d": 1.0}), _m(_t("tri", 3200, 3200, 1.0, 0.008), {"trem": 14.0, "trem_d": 1.0}), _t("saw", 70, 70, 1.0, 0.02)], 1.0],
 		"splice_loop": [[_m(_n(1.0, 0.12, "bp", 5000, -1, 3.0), {"trem": 17.0, "trem_d": 0.9}), _m(_t("saw", 100, 100, 1.0, 0.02), {"trem": 17.0, "trem_d": 0.9})], 1.0],
 		"clone_loop": [[_m(_t("tri", 2400, 2400, 1.0, 0.03), {"trem": 9.0, "trem_d": 1.0}), _n(1.0, 0.01, "bp", 6000, -1, 2.0)], 1.0],
 		"work_loop": [[_m(_n(1.0, 0.08, "bp", 1800, -1, 2.0), {"trem": 6.0, "trem_d": 0.8})], 1.0],
@@ -173,7 +175,7 @@ func _loop_defs() -> Dictionary:
 ## Level trims applied at render time, so each cue lands where it belongs in the mix: interface
 ## cues and tones just above the noise floor, machines audible from a few metres, beds felt.
 const GAIN := {
-	"cam_servo": 8.0, "motor": 4.0, "copy_loop": 5.0, "clone_loop": 5.0, "work_loop": 4.0, "vent_loop": 3.0, "term_hum": 5.0,
+	"cam_servo": 8.0, "motor": 4.0, "copy_loop": 5.0, "clone_loop": 5.0, "work_loop": 4.0, "vent_loop": 3.0, "term_hum": 5.0, "brute_loop": 4.0, "plug": 2.5,
 	"bed_notice": 2.5, "bed_hunt": 1.6,
 	"badge_ok": 3.0, "maglock": 1.5, "cam_notice": 3.0, "cam_dead": 2.0, "drone_lock": 5.0, "drone_scan": 2.5, "flashlight": 2.0,
 	"power_up": 2.5, "hq_tone": 2.2, "key": 2.0, "term_login": 2.5, "term_ok": 2.0, "term_err": 4.0, "term_trace": 5.0, "deny": 3.0,

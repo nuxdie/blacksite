@@ -1,19 +1,32 @@
 class_name NetConsole
 extends RefCounted
-## The command console on the operator's handheld deck, used against facility security props.
+## The command console on the operator's nettop, used against facility security props.
 ##
-## You reach it only by clipping the deck's wired implant to an access port. The deck is a small
-## field unit with a fold-out keyboard. You map what is on the line with `nmap`, then address each
-## prop by its name or address and act on it with a named command. Every command raises a trace
-## meter that locks you out if it fills; a few need an admin session from a security badge.
+## You reach it by putting the nettop down at an access port and running a cable to it. The
+## nettop then logs in on its own: a cloned security badge is presented over the link (clean,
+## admin), a login read off a box's cover is tried first (quick, quiet), and otherwise the
+## nettop brute-forces the port's login from a list of factory defaults — slow, and every failed
+## attempt lands in their logs. Once in, you map what is on the line with `nmap`, then address
+## each prop by its name or address and act on it with a named command. Every command raises a
+## trace meter that locks you out if it fills; a few need the admin session.
 ##
 ## This is entirely game fiction and operates only on in-game props (cameras, doors, breakers, the
 ## radio relay, drones). It performs no real scanning or networking of any kind.
+
+enum Phase { LOGIN, SHELL }
 
 var game: Game
 var node: Device
 var admin := false
 var connected := false
+var phase := Phase.SHELL
+## How the login is being done: "badge", "creds" (read off the cover) or "brute".
+var mode := ""
+var attempts: Array[String] = []
+var attempt_i := 0
+var login_t := 0.0
+var login_dur := 0.0
+var _next_t := 0.0
 var input := ""
 var cursor := 0
 var log: Array[Dictionary] = []
@@ -25,28 +38,124 @@ var flash := ""
 ## True once nmap has listed the props this session.
 var scanned := false
 
-const PROMPT := "operator@deck"
+const PROMPT := "operator@nettop"
 const SUBNET := "10.13.37.0/24"
+const BRUTE_TIME := 15.0
+const BRUTE_TRACE := 45.0
+## Factory logins the brute-force walks through, in order. The port's real one goes last.
+const DEFAULTS: Array[String] = [
+	"admin:admin", "admin:password", "admin:1234", "root:root", "admin:12345", "root:toor",
+	"admin:default", "service:service", "tech:tech", "admin:admin123", "operator:operator",
+	"root:password", "admin:P@ssw0rd", "install:install", "root:1234", "guest:guest",
+	"admin:changeme", "root:changeme", "admin:letmein", "maint:maint", "admin:cctv",
+	"admin:facility", "admin:0000", "root:admin", "admin:1111", "admin:qwerty", "sec:sec",
+	"admin:Welcome1", "admin:site", "supervisor:supervisor", "admin:security", "user:user",
+	"admin:camera", "root:default", "admin:access", "admin:gate", "admin:123456", "root:service",
+	"admin:ops", "field:field", "admin:node", "root:install", "admin:remote", "admin:secure",
+	"admin:4321", "root:0000", "admin:blacksite",
+]
 
 
-func open(p_node: Device, p_admin: bool) -> void:
+## Cable up and start the login. `p_mode` is "badge", "creds" or "brute".
+func open(p_node: Device, p_mode: String) -> void:
 	node = p_node
-	admin = p_admin
+	mode = p_mode
+	admin = false
 	connected = true
+	phase = Phase.LOGIN
 	input = ""
 	cursor = 0
 	log.clear()
 	history.clear()
 	hist_i = 0
 	scanned = false
-	_out("deck: implant clipped to %s  ·  %s" % [_slug(node.label), SUBNET], "dim")
-	_out("session: %s" % ("admin (badge)" if admin else "guest (no badge)"), "green" if admin else "amber")
-	_out("run `nmap` to list what's on the line. `help` lists commands, Tab completes.", "dim")
+	attempts.clear()
+	attempt_i = 0
+	login_t = 0.0
+	_next_t = 0.9
+	_out("nettop: link up on %s  ·  1000M full  ·  %s" % [_slug(node.label), SUBNET], "dim")
+	_out("probe: ssh on %s  ·  open  ·  banner \"secnet-%s\"" % [_host_ip(), _slug(node.label)], "dim")
+	match mode:
+		"badge":
+			login_dur = 1.8
+			_out("auth: presenting security badge over the link …", "amber")
+		"creds":
+			login_dur = 2.4
+			attempts = [node.password]
+			_out("auth: trying the login written inside the cover …", "amber")
+		_:
+			login_dur = BRUTE_TIME
+			for a in DEFAULTS:
+				if a != node.password:
+					attempts.append(a)
+			attempts.append(node.password)
+			_out("bruteforce: %d factory logins against ssh  ·  every miss is logged on their side" % attempts.size(), "amber")
 
 
 func close() -> void:
 	connected = false
+	phase = Phase.SHELL
 	node = null
+
+
+## The login runs itself; lines appear as attempts go by, and the shell opens on the hit.
+func tick(dt: float) -> void:
+	if phase != Phase.LOGIN or not connected:
+		return
+	login_t += dt
+	if mode == "brute":
+		var per := login_dur / attempts.size()
+		while attempt_i < attempts.size() - 1 and login_t >= per * (attempt_i + 1):
+			_out("  [%2d/%d]  %-24s denied" % [attempt_i + 1, attempts.size(), attempts[attempt_i]], "dim")
+			Sfx.ui("key", -14.0)
+			attempt_i += 1
+			game.add_trace(BRUTE_TRACE / attempts.size(), "Failed login")
+			if not connected:
+				return
+	elif mode == "creds" and attempt_i == 0 and login_t >= 1.0:
+		_out("  [ 1/1]  %-24s …" % attempts[0], "dim")
+		attempt_i = 1
+	if login_t >= login_dur:
+		finish_login()
+
+
+## Jump to the end of the login (the hit, the badge accepted).
+func finish_login() -> void:
+	if phase != Phase.LOGIN:
+		return
+	phase = Phase.SHELL
+	match mode:
+		"badge":
+			admin = true
+			_out("auth: badge accepted  ·  session: admin", "green")
+		"creds":
+			_out("  [ 1/1]  %-24s OK" % attempts[0], "green")
+			_out("session: user (cover login)", "green")
+			game.add_trace(5.0, "Login")
+		_:
+			_out("  [%2d/%d]  %-24s OK" % [attempts.size(), attempts.size(), attempts[-1]], "green")
+			_out("session: user (brute-forced)  ·  %d failed logins on record" % (attempts.size() - 1), "amber")
+	_out("run `nmap` to list what's on the line. `help` lists commands, Tab completes.", "dim")
+	game.session_opened()
+
+
+## Login progress, 0..1, for the interface.
+func login_progress() -> float:
+	return clampf(login_t / login_dur, 0.0, 1.0) if phase == Phase.LOGIN else 1.0
+
+
+## Whether the nettop's activity light is on this instant.
+func busy_blink(t: float) -> bool:
+	if phase == Phase.LOGIN:
+		return fmod(t, 0.16) < 0.08
+	return fmod(t, 1.4) < 0.1
+
+
+func _host_ip() -> String:
+	match node.label:
+		"SECURITY TERMINAL": return "10.13.37.1"
+		"SERVER CABINET": return "10.13.37.3"
+	return "10.13.37.4"
 
 
 # ------------------------------------------------------------------ typing
@@ -108,7 +217,7 @@ func submit() -> void:
 	var line := input.strip_edges()
 	input = ""
 	cursor = 0
-	if line == "":
+	if line == "" or phase != Phase.SHELL:
 		return
 	history.append(line)
 	if history.size() > 40:
@@ -436,7 +545,7 @@ func _catalog() -> Array[Dictionary]:
 		{"usage": "blackout", "verb": "blackout", "help": "all cameras off (+40)", "admin": true},
 		{"usage": "drones ground", "verb": "drones", "help": "recall the drones (+15)", "admin": true},
 		{"usage": "help", "verb": "help", "help": "this list", "admin": false},
-		{"usage": "exit", "verb": "logout", "help": "unclip and disconnect", "admin": false},
+		{"usage": "exit", "verb": "logout", "help": "unplug and pack up", "admin": false},
 	]
 
 

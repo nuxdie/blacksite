@@ -276,12 +276,41 @@ func _autotest() -> void:
 	_look_at(junction.use_point())
 	await _frames(3)
 	hk["junction_prompt"] = junction.use_label(game)
+	# the outdoor box is screwed shut: back the screws out and the cover hangs open
 	Input.action_press("interact")
-	await _frames(950)
+	await _frames(int(5.0 * 60.0) + 15)
+	Input.action_release("interact")
+	await _frames(60)
+	hk["cover_open"] = junction.cover_open
+	hk["connect_prompt"] = junction.use_label(game)
+	# cable the nettop up without having read the cover: it has to brute-force the login
+	Input.action_press("interact")
+	await _frames(int(1.6 * 60.0) + 10)
 	Input.action_release("interact")
 	await _frames(3)
-	hk["tablet_open"] = game.tablet_access == junction
+	hk["nettop_plugged"] = junction.plugged and game.tablet_access == junction
+	hk["login_mode"] = game.console.mode
+	hk["typing_ignored_during_login"] = true
+	await _console("nmap")
+	hk["typing_ignored_during_login"] = not game.console.scanned
+	await _frames(int(NetConsole.BRUTE_TIME * 60.0) + 40)
+	hk["tablet_open"] = game.tablet_access == junction and game.console.phase == NetConsole.Phase.SHELL
 	hk["trace_after_bypass"] = roundi(game.trace)
+	# read the login off the cover, reconnect: this time it goes straight in
+	game.close_tablet()
+	hk["nettop_packed"] = not junction.plugged
+	_look_at(junction.sticker_pos())
+	await _frames(50)
+	hk["creds_read"] = junction.creds_known
+	_look_at(junction.use_point())
+	await _frames(3)
+	hk["creds_prompt"] = junction.use_label(game)
+	Input.action_press("interact")
+	await _frames(int(1.6 * 60.0) + 10)
+	Input.action_release("interact")
+	hk["login_mode_2"] = game.console.mode
+	await _frames(int(2.4 * 60.0) + 30)
+	hk["creds_session"] = game.tablet_access == junction and game.console.phase == NetConsole.Phase.SHELL and not game.tablet_admin
 	await _console("nmap")
 	hk["nmap_hosts"] = game.console.hosts().size()
 	hk["nmap_scanned"] = game.console.scanned
@@ -328,7 +357,8 @@ func _autotest() -> void:
 	Input.action_press("interact")
 	await _frames(100)
 	Input.action_release("interact")
-	await _frames(3)
+	hk["badge_login_mode"] = game.console.mode
+	await _frames(int(1.8 * 60.0) + 30)
 	hk["admin"] = game.tablet_admin
 	hk["trace_with_badge"] = roundi(game.trace)
 	await _console("blackout")
@@ -960,6 +990,7 @@ func _shots(dir: String) -> void:
 	_snap(dir + "/terminal.png")
 	term.on_used(game)
 	await get_tree().create_timer(0.3).timeout
+	game.console.finish_login()
 	for cmd: String in ["ls", "loop 2", "unlock server", "relay off"]:
 		game.console.input = cmd
 		game.console.submit()
@@ -968,6 +999,30 @@ func _shots(dir: String) -> void:
 	await get_tree().create_timer(0.2).timeout
 	_snap(dir + "/tablet.png")
 	game.close_tablet()
+	# the outdoor box: cover unscrewed and hanging with its login showing, then the brute-force
+	game.has_badge = false
+	var junction := _device("JUNCTION BOX")
+	game.player.global_position = junction.use_point() + Vector3(0.35, -1.3, -1.1)
+	await get_tree().create_timer(0.2).timeout
+	junction.creds_known = true
+	junction.on_used(game)
+	await get_tree().create_timer(1.0).timeout
+	_look_at(junction.sticker_pos())
+	await get_tree().create_timer(0.2).timeout
+	_snap(dir + "/cover.png")
+	_look_at(junction.use_point())
+	junction.creds_known = false
+	junction.on_used(game)
+	await get_tree().create_timer(4.5).timeout
+	_snap(dir + "/bruteforce.png")
+	game.close_tablet()
+	# the nettop on the ground, cabled to the port (laid out without the console in the way)
+	junction.plug(true, game.player.chest_pos())
+	await get_tree().create_timer(1.0).timeout
+	_look_at(junction.to_global(junction._nettop_rest) + Vector3.UP * 0.3)
+	await get_tree().create_timer(0.2).timeout
+	_snap(dir + "/nettop.png")
+	junction.plug(false)
 	await _sight_shots(dir)
 
 
