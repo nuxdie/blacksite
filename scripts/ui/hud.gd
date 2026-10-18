@@ -987,109 +987,195 @@ func _draw_subtitles(size: Vector2) -> void:
 
 ## The network terminal: a typed console on the left, the watched camera feed top-right, trace
 ## below it, and a live palette of what you can type. Self-documenting; nothing to memorise.
+## The deck: a small windowed desktop on the nettop. Terminals tile on the left, one to four of
+## them, each with its own scrollback; the camera feed and the host table sit on the right.
+## Ctrl+N opens a terminal, Ctrl+Tab moves between them, Ctrl+W closes one.
 func _draw_tablet(size: Vector2) -> void:
 	var con := game.console
-	var cams := game.cameras()
-	var w := minf(1060.0, size.x - 70.0)
-	var h := w * 0.52
-	var r := Rect2((size.x - w) * 0.5, (size.y - h) * 0.5 - 40.0, w, h)
-	var feed_w := 376.0
-	var con_w := w - feed_w - 28.0
-	var fx := r.position.x + con_w + 20.0
-	var feed := Rect2(fx, r.position.y, feed_w, feed_w * 0.56)
-	# the camera feed is a real TextureRect drawn underneath this overlay, so paint the panel
-	# background around it (not over it) or the live image would be hidden
-	var panel := r.grow(16)
-	_overlay.draw_rect(Rect2(panel.position, Vector2(feed.position.x - panel.position.x, panel.size.y)), Style.BG)
-	_overlay.draw_rect(Rect2(Vector2(feed.position.x, panel.position.y), Vector2(panel.end.x - feed.position.x, feed.position.y - panel.position.y)), Style.BG)
-	_overlay.draw_rect(Rect2(Vector2(feed.position.x, feed.end.y), Vector2(panel.end.x - feed.position.x, panel.end.y - feed.end.y)), Style.BG)
-	_overlay.draw_rect(panel, Color(0.3, 0.9, 0.6, 0.16), false, 1.0)
-	var logging_in := con.phase == NetConsole.Phase.LOGIN
-	var state: String = {"badge": "BADGE LOGIN", "creds": "COVER LOGIN", "brute": "BRUTE FORCE"}.get(con.mode, "") if logging_in else ("ADMIN" if game.tablet_admin else "USER")
-	var header := "OPERATOR NETTOP  //  %s  //  %s  //  %s" % [NetConsole._slug(game.tablet_access.label), NetConsole.SUBNET, state]
-	_micro(r.position + Vector2(0, -24), header, AMBER if logging_in else GREEN)
 	var mono := _f_label
-	var line_h := 17.0
-	var pal_h := 86.0
-	var log_bottom := r.position.y + h - pal_h - 34.0
-	var shown: Array = con.log.slice(maxi(0, con.log.size() - int((log_bottom - r.position.y - 8.0) / line_h)))
-	var ly := r.position.y + 10.0
-	for e: Dictionary in shown:
-		_text(Vector2(r.position.x + 4, ly + 12), e.text, 13, _tag_color(e.tag), HORIZONTAL_ALIGNMENT_LEFT, mono)
-		ly += line_h
-	var iy := log_bottom + 6.0
-	_rule(Vector2(r.position.x, iy), Vector2(r.position.x + con_w, iy), Color(1, 1, 1, 0.1))
+	var w := minf(1240.0, size.x - 60.0)
+	var h := minf(w * 0.58, size.y - 110.0)
+	var r := Rect2((size.x - w) * 0.5, (size.y - h) * 0.5 - 20.0, w, h)
+	var logging_in := con.phase == NetConsole.Phase.LOGIN
+	var gap := 10.0
+	var bar_h := 26.0
+	var task_h := 24.0
+	var right_w := 390.0
+	var content := Rect2(r.position + Vector2(0, bar_h + 4), Vector2(w, h - bar_h - task_h - 8))
+	var left := Rect2(content.position, Vector2(content.size.x - right_w - gap, content.size.y))
+	var right := Rect2(Vector2(left.end.x + gap, content.position.y), Vector2(right_w, content.size.y))
+	var feed_win := Rect2(right.position, Vector2(right_w, right_w * 0.56 + 20.0))
+	var feed := _win_content(feed_win)
+	var hosts_win := Rect2(Vector2(right.position.x, feed_win.end.y + gap), Vector2(right_w, right.end.y - feed_win.end.y - gap))
+	# the feed is a real TextureRect under this overlay: paint the panel around it, not over it
+	var panel := r.grow(14)
 	if logging_in:
-		_draw_login(con, r, con_w, iy, feed, fx, feed_w, mono)
-		return
-	var prompt := NetConsole.PROMPT + ":~$ "
-	_text(Vector2(r.position.x + 4, iy + 20), prompt, 13, GREEN, HORIZONTAL_ALIGNMENT_LEFT, mono)
-	var pw := mono.get_string_size(prompt, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-	_text(Vector2(r.position.x + 4 + pw, iy + 20), con.input, 13, INK, HORIZONTAL_ALIGNMENT_LEFT, mono)
-	if fmod(game.time, 1.0) < 0.5:
-		var cx := r.position.x + 4 + pw + mono.get_string_size(con.input.substr(0, con.cursor), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		_overlay.draw_rect(Rect2(cx, iy + 7, 7, 15), Color(GREEN, 0.8))
-	var sugg := con.suggestions()
-	var py := iy + 34.0
-	_micro(Vector2(r.position.x + 4, py + 10), "COMMANDS", DIM)
-	var sx := r.position.x + 4
-	var swy := py + 28.0
-	for item: Dictionary in sugg.slice(0, 10):
-		var label2: String = item.text + ("  " + item.help if item.help != "" else "")
-		var tw := mono.get_string_size(label2, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 14.0
-		if sx + tw > r.position.x + con_w:
-			sx = r.position.x + 4
-			swy += 20.0
-		_overlay.draw_rect(Rect2(sx, swy - 13, tw - 6, 18), Color(1, 1, 1, 0.05))
-		_text(Vector2(sx + 5, swy), item.text, 12, AMBER if item.admin else INK, HORIZONTAL_ALIGNMENT_LEFT, mono)
-		if item.help != "":
-			var ox := mono.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 10.0
-			_text(Vector2(sx + 5 + ox, swy), item.help, 12, DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
-		sx += tw
+		_overlay.draw_rect(panel, Style.BG)
+	else:
+		_overlay.draw_rect(Rect2(panel.position, Vector2(feed.position.x - panel.position.x, panel.size.y)), Style.BG)
+		_overlay.draw_rect(Rect2(Vector2(feed.position.x, panel.position.y), Vector2(panel.end.x - feed.position.x, feed.position.y - panel.position.y)), Style.BG)
+		_overlay.draw_rect(Rect2(Vector2(feed.position.x, feed.end.y), Vector2(panel.end.x - feed.position.x, panel.end.y - feed.end.y)), Style.BG)
+		_overlay.draw_rect(Rect2(Vector2(feed.end.x, feed.position.y), Vector2(panel.end.x - feed.end.x, feed.size.y)), Style.BG)
+	_overlay.draw_rect(panel, Color(0.3, 0.9, 0.6, 0.16), false, 1.0)
+	# top bar: who we are, where we are, how deep in
+	var state: String = {"saved": "CACHED SESSION", "badge": "BADGE LOGIN", "creds": "COVER LOGIN", "brute": "BRUTE FORCE"}.get(con.mode, "") if logging_in else ("ADMIN SESSION" if game.tablet_admin else "USER SESSION")
+	_micro(r.position + Vector2(0, 14), "OPERATOR NETTOP  //  %s  //  %s  //  %s" % [NetConsole._slug(game.tablet_access.label), NetConsole.SUBNET, state], AMBER if logging_in else GREEN)
+	var secs := int(game.time) + 7_380
+	_micro(Vector2(r.end.x, r.position.y + 14), "02:%02d:%02d" % [(secs / 60) % 60, secs % 60], DIM, HORIZONTAL_ALIGNMENT_RIGHT)
+	var tb := Rect2(r.end.x - 230.0, r.position.y + 7, 110.0, 4)
+	_micro(Vector2(tb.position.x - 44, r.position.y + 14), "TRACE", DIM)
+	_overlay.draw_rect(tb, Color(1, 1, 1, 0.1))
+	_overlay.draw_rect(Rect2(tb.position, Vector2(tb.size.x * clampf(game.trace / 100.0, 0.0, 1.0), 4)), RED if game.trace > 70.0 else AMBER)
+	if _trace_t > 0.0:
+		_micro(Vector2(tb.position.x - 44, r.position.y + 14 - 14), _trace_reason, Color(RED, minf(1.0, _trace_t)))
+	_rule(Vector2(r.position.x, r.position.y + bar_h - 2), Vector2(r.end.x, r.position.y + bar_h - 2), Color(1, 1, 1, 0.1))
+	# terminals
+	var rects := _tile(left, con.terms.size(), gap)
+	for i in con.terms.size():
+		_draw_term(rects[i], con, i, i == con.focus and not logging_in, mono, logging_in and i == 0)
+	# the feed window
+	var feed_title: String = "FEED  ·  NO SESSION" if logging_in else "FEED  ·  " + str(con.feed_source().label)
+	_window(feed_win, feed_title, false)
 	_feed_rect.position = feed.position
 	_feed_rect.size = feed.size
-	_overlay.draw_rect(feed, Color(1, 1, 1, 0.15), false, 1.0)
-	var secs := int(game.time) + 7_380
-	_text(feed.position + Vector2(8, 16), "%s  02:%02d:%02d" % [con.feed_source().label, (secs / 60) % 60, secs % 60], 12, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_LEFT, mono)
-	if fmod(game.time, 1.0) < 0.5:
-		_overlay.draw_circle(feed.position + Vector2(feed.size.x - 14, 13), 4.0, RED)
-	var ty := feed.end.y + 22.0
-	_micro(Vector2(fx, ty - 6), "TRACE", DIM)
-	var bar := Rect2(fx + 54, ty - 13, feed_w - 54, 4)
-	_overlay.draw_rect(bar, Color(1, 1, 1, 0.1))
-	_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * clampf(game.trace / 100.0, 0.0, 1.0), 4)), RED if game.trace > 70.0 else AMBER)
-	if _trace_t > 0.0:
-		_micro(Vector2(fx, ty + 16), _trace_reason, Color(RED, minf(1.0, _trace_t)))
-	_micro(Vector2(fx, feed.end.y + 48.0), "ESC DISCONNECT  ·  TAB COMPLETE  ·  ↑ HISTORY", DIM)
+	if logging_in:
+		_overlay.draw_rect(feed, Color(0, 0, 0, 0.35))
+		var k := con.login_progress()
+		var big := "%d" % roundi(k * 100.0) + "%"
+		if con.mode == "brute":
+			big = "%d" % con.attempt_i
+		_text(feed.get_center() + Vector2(0, 14), big, 40, AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_label)
+		_micro(feed.get_center() + Vector2(0, 40), "ATTEMPTS" if con.mode == "brute" else "HANDSHAKE", DIM, HORIZONTAL_ALIGNMENT_CENTER)
+	else:
+		if fmod(game.time, 1.0) < 0.5:
+			_overlay.draw_circle(feed.position + Vector2(feed.size.x - 14, 13), 4.0, RED)
+		_text(feed.position + Vector2(8, 16), "LIVE" if con.feed_source().feed_live() else "NO SIGNAL", 12, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_LEFT, mono)
+	# the host table
+	_window(hosts_win, "HOSTS  ·  " + NetConsole.SUBNET, false)
+	var hc := _win_content(hosts_win)
+	if logging_in:
+		_micro(hc.position + Vector2(6, 16), "NO SESSION", DIM)
+	elif not con.scanned:
+		_micro(hc.position + Vector2(6, 16), "RUN  nmap  TO MAP THE LINE", DIM)
+	else:
+		var hy := hc.position.y + 14.0
+		for hst: Dictionary in con.hosts():
+			if hy > hc.end.y - 4.0:
+				break
+			var tag: String = con._state_tag(hst)
+			_text(Vector2(hc.position.x + 6, hy), "%-13s %-16s" % [hst.ip, hst.host], 12, INK, HORIZONTAL_ALIGNMENT_LEFT, mono)
+			_text(Vector2(hc.end.x - 6, hy), con._host_state(hst), 12, _tag_color(tag), HORIZONTAL_ALIGNMENT_RIGHT, mono)
+			hy += 15.0
+	# the taskbar: windows by number, keys on the right
+	var ty := r.end.y - 6.0
+	var tx := r.position.x
+	for i in con.terms.size():
+		var focused := i == con.focus and not logging_in
+		var lab := "%d  TERM" % (i + 1) + ("  ·  %s" % con.terms[i].job.to_upper() if con.terms[i].job != "" else "")
+		var tw := _width(lab, 11, _f_micro) + 16.0
+		_overlay.draw_rect(Rect2(tx, ty - 14, tw, 18), Color(GREEN, 0.18) if focused else Color(1, 1, 1, 0.05))
+		_micro(Vector2(tx + 8, ty), lab, GREEN if focused else DIM)
+		tx += tw + 6.0
+	for lab2: String in ["FEED", "HOSTS"]:
+		var tw2 := _width(lab2, 11, _f_micro) + 16.0
+		_overlay.draw_rect(Rect2(tx, ty - 14, tw2, 18), Color(1, 1, 1, 0.05))
+		_micro(Vector2(tx + 8, ty), lab2, DIM)
+		tx += tw2 + 6.0
+	var keys := "ESC PULL THE CABLE" if logging_in else "CTRL+N NEW TERMINAL  ·  CTRL+TAB SWITCH  ·  CTRL+W CLOSE  ·  TAB COMPLETE  ·  ↑ HISTORY  ·  ESC DISCONNECT"
+	_micro(Vector2(r.end.x, ty), keys, DIM, HORIZONTAL_ALIGNMENT_RIGHT)
 
 
-## The nettop working the login: a progress bar where the prompt will be, the attempt counter
-## where the feed will be, and nothing to type yet.
-func _draw_login(con: NetConsole, r: Rect2, con_w: float, iy: float, feed: Rect2, fx: float, feed_w: float, mono: Font) -> void:
-	var k := con.login_progress()
-	var what: String = {"badge": "PRESENTING BADGE", "creds": "TRYING THE COVER LOGIN", "brute": "BRUTE-FORCING  %d / %d" % [con.attempt_i, con.attempts.size()]}.get(con.mode, "")
-	_micro(Vector2(r.position.x + 4, iy + 20), what, AMBER)
-	var bar := Rect2(r.position.x + 4, iy + 30, con_w - 8, 4)
-	_overlay.draw_rect(bar, Color(1, 1, 1, 0.1))
-	_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, 4)), AMBER)
-	if con.mode == "brute":
-		var left := maxf(0.0, con.login_dur - con.login_t)
-		_micro(Vector2(r.position.x + 4, iy + 54), "%d s  ·  trace climbs with every miss" % ceili(left), DIM)
-	_overlay.draw_rect(feed, Color(1, 1, 1, 0.15), false, 1.0)
-	_text(feed.position + Vector2(8, 16), "NO SESSION", 12, Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_LEFT, mono)
-	var big := "%d" % roundi(k * 100.0) + "%"
-	if con.mode == "brute":
-		big = "%d" % con.attempt_i
-	_text(feed.get_center() + Vector2(0, 14), big, 40, AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_label)
-	_micro(feed.get_center() + Vector2(0, 40), "ATTEMPTS" if con.mode == "brute" else "HANDSHAKE", DIM, HORIZONTAL_ALIGNMENT_CENTER)
-	var ty := feed.end.y + 22.0
-	_micro(Vector2(fx, ty - 6), "TRACE", DIM)
-	var tbar := Rect2(fx + 54, ty - 13, feed_w - 54, 4)
-	_overlay.draw_rect(tbar, Color(1, 1, 1, 0.1))
-	_overlay.draw_rect(Rect2(tbar.position, Vector2(tbar.size.x * clampf(game.trace / 100.0, 0.0, 1.0), 4)), RED if game.trace > 70.0 else AMBER)
-	if _trace_t > 0.0:
-		_micro(Vector2(fx, ty + 16), _trace_reason, Color(RED, minf(1.0, _trace_t)))
-	_micro(Vector2(fx, feed.end.y + 60.0), "ESC PULL THE CABLE", DIM)
+## Split an area between n terminals: one fills it, two stack, three put one wide on top,
+## four make a grid.
+func _tile(area: Rect2, n: int, gap: float) -> Array[Rect2]:
+	var out: Array[Rect2] = []
+	var half_w := (area.size.x - gap) * 0.5
+	var half_h := (area.size.y - gap) * 0.5
+	match n:
+		1:
+			out.append(area)
+		2:
+			out.append(Rect2(area.position, Vector2(area.size.x, half_h)))
+			out.append(Rect2(area.position + Vector2(0, half_h + gap), Vector2(area.size.x, half_h)))
+		3:
+			out.append(Rect2(area.position, Vector2(area.size.x, half_h)))
+			out.append(Rect2(area.position + Vector2(0, half_h + gap), Vector2(half_w, half_h)))
+			out.append(Rect2(area.position + Vector2(half_w + gap, half_h + gap), Vector2(half_w, half_h)))
+		_:
+			out.append(Rect2(area.position, Vector2(half_w, half_h)))
+			out.append(Rect2(area.position + Vector2(half_w + gap, 0), Vector2(half_w, half_h)))
+			out.append(Rect2(area.position + Vector2(0, half_h + gap), Vector2(half_w, half_h)))
+			out.append(Rect2(area.position + Vector2(half_w + gap, half_h + gap), Vector2(half_w, half_h)))
+	return out
+
+
+const WIN_TITLE := 18.0
+
+
+## A window frame with a title bar; returns nothing, the content rect comes from _win_content.
+func _window(rect: Rect2, title: String, focused: bool) -> void:
+	_overlay.draw_rect(Rect2(rect.position, Vector2(rect.size.x, WIN_TITLE)), Color(GREEN, 0.12) if focused else Color(1, 1, 1, 0.05))
+	_overlay.draw_rect(rect, Color(GREEN, 0.55) if focused else Color(1, 1, 1, 0.14), false, 1.0)
+	_micro(rect.position + Vector2(7, 13), title, GREEN if focused else DIM)
+
+
+func _win_content(rect: Rect2) -> Rect2:
+	return Rect2(rect.position + Vector2(1, WIN_TITLE + 1), rect.size - Vector2(2, WIN_TITLE + 2))
+
+
+## One terminal: scrollback above, the command line (or the running job, or the login) below,
+## and in the focused one a row of what you could type next.
+func _draw_term(rect: Rect2, con: NetConsole, i: int, focused: bool, mono: Font, login: bool) -> void:
+	var t: NetConsole.Term = con.terms[i]
+	_window(rect, "TERMINAL %d  ·  %s@%s" % [i + 1, "operator", NetConsole._slug(game.tablet_access.label)], focused)
+	var c := _win_content(rect)
+	var line_h := 16.0
+	var pal_h := 24.0 if focused and not login and t.job == "" else 0.0
+	var prompt_y := c.end.y - 10.0 - pal_h
+	if login:
+		prompt_y = c.end.y - 28.0
+	var rows := maxi(1, int((prompt_y - 14.0 - c.position.y) / line_h))
+	var shown: Array = t.log.slice(maxi(0, t.log.size() - rows))
+	var ly := c.position.y + 4.0
+	for e: Dictionary in shown:
+		_text(Vector2(c.position.x + 5, ly + 12), e.text, 13, _tag_color(e.tag), HORIZONTAL_ALIGNMENT_LEFT, mono)
+		ly += line_h
+	_rule(Vector2(c.position.x, prompt_y - 14.0), Vector2(c.end.x, prompt_y - 14.0), Color(1, 1, 1, 0.08))
+	if login:
+		var k := con.login_progress()
+		var what: String = {"saved": "RESUMING THE CACHED SESSION", "badge": "PRESENTING BADGE", "creds": "TRYING THE COVER LOGIN", "brute": "BRUTE-FORCING  %d / %d" % [con.attempt_i, con.attempts.size()]}.get(con.mode, "")
+		_micro(Vector2(c.position.x + 5, prompt_y), what, AMBER)
+		var bar := Rect2(c.position.x + 5, prompt_y + 8, c.size.x - 10, 4)
+		_overlay.draw_rect(bar, Color(1, 1, 1, 0.1))
+		_overlay.draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, 4)), AMBER)
+		if con.mode == "brute":
+			_micro(Vector2(c.end.x - 5, prompt_y), "%d s  ·  trace climbs with every miss" % ceili(maxf(0.0, con.login_dur - con.login_t)), DIM, HORIZONTAL_ALIGNMENT_RIGHT)
+		return
+	if t.job != "":
+		var spin := "|/-\\"[int(game.time * 8.0) % 4]
+		_text(Vector2(c.position.x + 5, prompt_y), "%s  %s running …" % [spin, t.job], 13, AMBER, HORIZONTAL_ALIGNMENT_LEFT, mono)
+		return
+	var prompt := NetConsole.PROMPT + ":~$ "
+	_text(Vector2(c.position.x + 5, prompt_y), prompt, 13, GREEN if focused else DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
+	var pw := mono.get_string_size(prompt, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+	_text(Vector2(c.position.x + 5 + pw, prompt_y), t.input, 13, INK if focused else DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
+	if focused and fmod(game.time, 1.0) < 0.5:
+		var cx := c.position.x + 5 + pw + mono.get_string_size(t.input.substr(0, t.cursor), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		_overlay.draw_rect(Rect2(cx, prompt_y - 13, 7, 15), Color(GREEN, 0.8))
+	if pal_h > 0.0:
+		var sx := c.position.x + 5
+		var swy := c.end.y - 8.0
+		for item: Dictionary in con.suggestions().slice(0, 12):
+			var label2: String = item.text + ("  " + item.help if item.help != "" else "")
+			var tw := mono.get_string_size(label2, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 14.0
+			if sx + tw > c.end.x:
+				break
+			_overlay.draw_rect(Rect2(sx, swy - 13, tw - 6, 18), Color(1, 1, 1, 0.05))
+			_text(Vector2(sx + 5, swy), item.text, 12, AMBER if item.admin else INK, HORIZONTAL_ALIGNMENT_LEFT, mono)
+			if item.help != "":
+				var ox := mono.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 10.0
+				_text(Vector2(sx + 5 + ox, swy), item.help, 12, DIM, HORIZONTAL_ALIGNMENT_LEFT, mono)
+			sx += tw
 
 
 func _tag_color(tag: String) -> Color:

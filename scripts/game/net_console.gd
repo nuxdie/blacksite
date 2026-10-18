@@ -15,6 +15,26 @@ extends RefCounted
 
 enum Phase { LOGIN, SHELL }
 
+## One terminal window on the deck: its own scrollback, command line and history. A scan runs in
+## the terminal it was typed in, and you can work in another one meanwhile.
+class Term:
+	var input := ""
+	var cursor := 0
+	var log: Array[Dictionary] = []
+	var history: Array[String] = []
+	var hist_i := 0
+	## A command still running here ("nmap"), how long for, and how far it got.
+	var job := ""
+	var job_t := 0.0
+	var job_i := 0
+
+
+const MAX_TERMS := 4
+var terms: Array[Term] = []
+var focus := 0
+## Where output lands: a running job's own terminal while it prints, otherwise the focused one.
+var _out_term: Term = null
+
 var game: Game
 var node: Device
 var admin := false
@@ -27,11 +47,28 @@ var attempt_i := 0
 var login_t := 0.0
 var login_dur := 0.0
 var _next_t := 0.0
-var input := ""
-var cursor := 0
-var log: Array[Dictionary] = []
-var history: Array[String] = []
-var hist_i := 0
+# The command line, scrollback and history of the focused terminal.
+var input: String:
+	get:
+		return term().input
+	set(v):
+		term().input = v
+var cursor: int:
+	get:
+		return term().cursor
+	set(v):
+		term().cursor = v
+var log: Array[Dictionary]:
+	get:
+		return term().log
+var history: Array[String]:
+	get:
+		return term().history
+var hist_i: int:
+	get:
+		return term().hist_i
+	set(v):
+		term().hist_i = v
 var watch_cam := 0
 ## Riding a drone's camera instead of a fixed one.
 var watch_drone: Drone = null
@@ -65,11 +102,10 @@ func open(p_node: Device, p_mode: String) -> void:
 	admin = false
 	connected = true
 	phase = Phase.LOGIN
-	input = ""
-	cursor = 0
-	log.clear()
-	history.clear()
-	hist_i = 0
+	terms.clear()
+	terms.append(Term.new())
+	focus = 0
+	_out_term = null
 	scanned = false
 	attempts.clear()
 	attempt_i = 0
@@ -104,6 +140,61 @@ func close() -> void:
 	watch_drone = null
 
 
+# ------------------------------------------------------------------ terminals
+
+func term() -> Term:
+	if terms.is_empty():
+		terms.append(Term.new())
+	focus = clampi(focus, 0, terms.size() - 1)
+	return terms[focus]
+
+
+func new_term() -> void:
+	if terms.size() >= MAX_TERMS:
+		_out("no more terminals: four is the deck's limit", "red")
+		return
+	terms.append(Term.new())
+	focus = terms.size() - 1
+	_out("terminal %d  ·  ctrl+tab moves between them, ctrl+w closes this one" % terms.size(), "dim")
+
+
+func close_term() -> void:
+	if terms.size() <= 1:
+		_out("the last terminal stays open; `exit` pulls the cable", "dim")
+		return
+	terms.remove_at(focus)
+	focus = clampi(focus, 0, terms.size() - 1)
+
+
+func cycle(d: int) -> void:
+	focus = wrapi(focus + d, 0, terms.size())
+
+
+func focus_term(i: int) -> void:
+	if i >= 0 and i < terms.size():
+		focus = i
+
+
+## Jobs print into their own terminal as they go.
+func _tick_jobs(dt: float) -> void:
+	for t in terms:
+		if t.job == "":
+			continue
+		t.job_t += dt
+		_out_term = t
+		if t.job == "nmap":
+			var hs := hosts()
+			while t.job_i < hs.size() and t.job_t >= 0.22 * (t.job_i + 1):
+				var h := hs[t.job_i]
+				_out("  %-13s %-16s %-6s %s" % [h.ip, h.host, h.short, _host_state(h)], _state_tag(h), true)
+				t.job_i += 1
+			if t.job_i >= hs.size():
+				t.job = ""
+				scanned = true
+				_out("%d props on the line  ·  name one to look closer:  nmap <name>" % hs.size(), "green")
+		_out_term = null
+
+
 ## What the feed window shows: a drone you're riding, or the chosen fixed camera.
 func feed_source() -> Node3D:
 	if watch_drone and not watch_drone.destroyed:
@@ -114,7 +205,10 @@ func feed_source() -> Node3D:
 
 ## The login runs itself; lines appear as attempts go by, and the shell opens on the hit.
 func tick(dt: float) -> void:
-	if phase != Phase.LOGIN or not connected:
+	if not connected:
+		return
+	if phase == Phase.SHELL:
+		_tick_jobs(dt)
 		return
 	login_t += dt
 	if mode == "brute":
@@ -231,6 +325,8 @@ func autocomplete() -> void:
 # ------------------------------------------------------------------ running
 
 func submit() -> void:
+	if term().job != "":
+		return
 	var line := input.strip_edges()
 	input = ""
 	cursor = 0
@@ -263,6 +359,8 @@ func _run(line: String) -> void:
 		"relay", "jam": _cmd_relay(args)
 		"drones": _cmd_drones(args)
 		"uav", "drone": _cmd_uav(args)
+		"term", "new": new_term()
+		"close": close_term()
 		"clear", "cls": log.clear()
 		"logout", "exit", "quit", "disconnect": game.close_tablet()
 		_: _out("%s: command not found   (try `help`)" % verb, "red")
@@ -332,14 +430,14 @@ func _cmd_nmap(args: Array) -> void:
 		_nmap_host(target)
 
 
+## A scan of the whole line takes a few seconds and prints hosts as it finds them; it runs in
+## this terminal, so open another one if you want to keep working.
 func _nmap_list() -> void:
-	scanned = true
-	_out("nmap %s" % SUBNET, "dim")
-	var hs := hosts()
-	_out("%d props on the line" % hs.size(), "green")
-	for h in hs:
-		_out("  %-13s %-16s %-6s %s" % [h.ip, h.host, h.short, _host_state(h)], _state_tag(h))
-	_out("name one to look closer:  nmap <name>", "dim")
+	var t := term()
+	t.job = "nmap"
+	t.job_t = 0.0
+	t.job_i = 0
+	_out("nmap %s  ·  probing %d addresses" % [SUBNET, hosts().size()], "dim")
 
 
 func _nmap_host(token: String) -> void:
@@ -619,6 +717,7 @@ func _catalog() -> Array[Dictionary]:
 		{"usage": "blackout", "verb": "blackout", "help": "all cameras off (+40)", "admin": true},
 		{"usage": "uav <id> ground", "verb": "uav", "help": "send one drone home for 90 s (+12)", "admin": false},
 		{"usage": "drones ground", "verb": "drones", "help": "recall the whole fleet (+15)", "admin": true},
+		{"usage": "term", "verb": "term", "help": "another terminal (ctrl+n)", "admin": false},
 		{"usage": "help", "verb": "help", "help": "this list", "admin": false},
 		{"usage": "exit", "verb": "logout", "help": "unplug and pack up", "admin": false},
 	]
@@ -675,14 +774,16 @@ func suggestions() -> Array:
 
 # ------------------------------------------------------------------ helpers
 
-func _out(text: String, tag := "plain") -> void:
-	log.append({"text": text, "tag": tag})
-	if tag == "red":
-		Sfx.ui("term_err", -8.0)
-	elif tag == "green":
-		Sfx.ui("term_ok", -10.0)
-	if log.size() > 80:
-		log.pop_front()
+func _out(text: String, tag := "plain", quiet := false) -> void:
+	var t := _out_term if _out_term else term()
+	t.log.append({"text": text, "tag": tag})
+	if not quiet:
+		if tag == "red":
+			Sfx.ui("term_err", -8.0)
+		elif tag == "green":
+			Sfx.ui("term_ok", -10.0)
+	if t.log.size() > 120:
+		t.log.pop_front()
 
 
 static func _slug(s: String) -> String:

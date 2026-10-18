@@ -25,6 +25,12 @@ func start() -> void:
 		await _shots(_args["shots"])
 	if _args.has("uishots"):
 		await _ui_shots(_args["uishots"])
+	if _args.has("map"):
+		await _map(_args["map"])
+	if _args.has("boxes"):
+		_boxes(_args["boxes"])
+	if _args.has("view"):
+		await _view(_args["view"])
 	if _args.has("autotest"):
 		await _autotest()
 	if _args.has("test"):
@@ -101,6 +107,11 @@ func _device(label: String) -> Device:
 func _console(cmd: String) -> void:
 	game.console.input = cmd
 	game.console.submit()
+	await _frames(2)
+	for _i in 600:
+		if game.console.term().job == "":
+			break
+		await get_tree().physics_frame
 	await _frames(2)
 
 
@@ -506,6 +517,7 @@ func _autotest() -> void:
 	r["multitool"] = await _multitool()
 	r["breach"] = await _breach()
 	r["social"] = await _social()
+	r["traffic"] = await _traffic()
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -607,6 +619,63 @@ func _multitool() -> Dictionary:
 
 ## Drones: scan from above, raise the alarm, grounded by comms-down, shot down, and no sight
 ## through walls or roofs.
+## The delivery truck: in through the gate to the bay, and out again with a stowaway in the bed.
+func _traffic() -> Dictionary:
+	var c := {}
+	await _fresh("carbine")
+	_isolate([])
+	var t: Truck = game.facility.vehicles[0]
+	var gate: Door = t.gate
+	var p := game.player
+	p.global_position = Vector3(-16, 0, -8)
+	t.next_t = 0.2
+	var gate_max := 0.0
+	var frames := 0
+	while t.state != Truck.State.LOADING and frames < 60 * 90:
+		await get_tree().physics_frame
+		frames += 1
+		gate_max = maxf(gate_max, gate.open_k)
+	c["arrived"] = t.state == Truck.State.LOADING and t.global_position.x > 12.0
+	c["gate_opened"] = gate_max > 0.9
+	c["trip_s"] = snappedf(frames / 60.0, 0.1)
+	# a guard in the lane stops it on the way out
+	var g := _find("yard", -10.0)
+	g.alive = true
+	g.visible = true
+	g.collision_layer = Layers.SOLDIERS
+	g.global_position = Vector3(-8.5, 0, -12.0)
+	g.post = g.global_position
+	g.patrol.clear()
+	# climb into the bed and lie flat; it should carry us out
+	p.global_position = t.bed_point()
+	p.prone_toggle = true
+	await _frames(20)
+	c["in_bed"] = t.carrying(p.global_position) and p.prone
+	var watcher := _find("yard", -12.5)
+	watcher.alive = true
+	watcher.visible = true
+	watcher.global_position = Vector3(-14.0, 0, 1.6)
+	c["hidden_in_bed"] = not game.los(watcher.eye(), p.chest_pos())
+	watcher.alive = false
+	watcher.visible = false
+	t.load_t = 0.3
+	game.mission = "extract"
+	var stopped_for_guard := false
+	frames = 0
+	while t.state == Truck.State.OUT or t.state == Truck.State.LOADING:
+		await get_tree().physics_frame
+		frames += 1
+		if t.state == Truck.State.OUT and absf(t.global_position.z - g.global_position.z) < 11.0 and t.speed < 0.2:
+			stopped_for_guard = true
+			g.global_position = Vector3(-14.0, 0, -12.0)
+		if game.phase == Game.Phase.DONE or frames > 60 * 120:
+			break
+	c["stopped_for_guard"] = stopped_for_guard
+	c["carried_out"] = p.global_position.z < -30.0
+	c["extracted_by_gate"] = game.phase == Game.Phase.DONE
+	return c
+
+
 ## Guards off duty: two posted close together fall into a chat; one alone lights a cigarette.
 func _social() -> Dictionary:
 	var c := {}
@@ -620,8 +689,9 @@ func _social() -> Dictionary:
 		s.global_position = Vector3(-10.0 if s == a else -12.5, 0, -10.0)
 		s.post = s.global_position
 		s.smoke_cool = 999.0
+		s.voice_t = 0.0
 	a.chat_cool = 0.0
-	await _frames(150)
+	await _frames(200)
 	c["chat_started"] = a.chat == b and b.chat == a
 	c["chat_line_said"] = a.voice_t > 0.0 or b.voice_t > 0.0
 	c["face_each_other"] = absf(wrapf(a.yaw - Soldier.yaw_of(b.global_position - a.global_position), -PI, PI)) < 0.5
@@ -1346,6 +1416,71 @@ func _sight_shots(dir: String) -> void:
 		_snap("%s/ads_%s.png" % [dir, id])
 		Input.action_release("aim")
 		await get_tree().create_timer(0.3).timeout
+
+
+## A plan view from high above the site, and the footprints of everything solid, for layout work.
+func _map(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	await _fresh("carbine")
+	game.god_mode = true
+	var p := game.player
+	p.camera.far = 400.0
+	for v: Array in [["map", Vector3(0, 78, 0)], ["map_w", Vector3(-28, 52, -6)], ["map_e", Vector3(24, 52, 0)], ["map_s", Vector3(-10, 45, -24)]]:
+		p.global_position = v[1]
+		p.velocity = Vector3.ZERO
+		p.yaw = 0.0
+		p.pitch = -1.5
+		for _i in 12:
+			p.global_position = v[1]
+			p.velocity = Vector3.ZERO
+			await get_tree().physics_frame
+		await get_tree().process_frame
+		await get_tree().process_frame
+		_snap(dir + "/%s.png" % v[0])
+	var fps := []
+	for r in game.facility.footprints:
+		fps.append([snappedf(r.position.x, 0.1), snappedf(r.position.y, 0.1), snappedf(r.size.x, 0.1), snappedf(r.size.y, 0.1)])
+	var f := FileAccess.open(dir + "/footprints.json", FileAccess.WRITE)
+	f.store_string(JSON.stringify(fps))
+	f.close()
+
+
+## One screenshot from anywhere: --view=x,y,z,yaw,pitch,path.png
+func _view(spec: String) -> void:
+	var v := spec.split(",")
+	await _fresh("carbine")
+	game.god_mode = true
+	var p := game.player
+	var pos := Vector3(float(v[0]), float(v[1]), float(v[2]))
+	for _i in 20:
+		p.global_position = pos
+		p.velocity = Vector3.ZERO
+		p.yaw = float(v[3])
+		p.pitch = float(v[4])
+		await get_tree().physics_frame
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_snap(v[5])
+
+
+## Every solid box in the facility as [x, y, z, sx, sy, sz] (centre and size), for route planning.
+func _boxes(path: String) -> void:
+	var out := []
+	var stack: Array = [game.facility]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for ch in n.get_children():
+			stack.append(ch)
+		if n is StaticBody3D and (n as StaticBody3D).collision_layer & Layers.WORLD:
+			for c in n.get_children():
+				if c is CollisionShape3D and c.shape is BoxShape3D:
+					var p := (n as Node3D).global_position
+					var sz: Vector3 = (c.shape as BoxShape3D).size
+					out.append([snappedf(p.x, 0.01), snappedf(p.y, 0.01), snappedf(p.z, 0.01), snappedf(sz.x, 0.01), snappedf(sz.y, 0.01), snappedf(sz.z, 0.01)])
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(JSON.stringify(out))
+	f.close()
+	print("BOXES ", out.size())
 
 
 func _snap(path: String) -> void:

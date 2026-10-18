@@ -26,6 +26,8 @@ var powered := true
 var unlocked := false
 ## Smashed off its track by an axe or a blast: it stays open for everyone.
 var broken := false
+## Held open from outside the reader's logic: a truck coming through.
+var hold := false
 ## Set each tick: the player is at this door and it won't open for them.
 var refused := false
 var _body: StaticBody3D
@@ -136,7 +138,7 @@ func access_name() -> String:
 
 
 func tick(dt: float, game: Game) -> void:
-	var want := broken
+	var want := broken or hold
 	refused = false
 	var c := global_position
 	for s in game.soldiers:

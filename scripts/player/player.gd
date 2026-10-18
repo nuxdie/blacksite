@@ -483,7 +483,9 @@ func _probe_surroundings() -> void:
 				if _can_fit(H_CROUCH, top):
 					vault_ok = true
 					vault_to = top
-					vault_peak = top.y + 0.15
+					# over the rim, not through it: a truck's side is taller than its bed
+					var rim := _ray(Vector3(hit.position.x + fwd.x * 0.06, feet.y + 2.5, hit.position.z + fwd.z * 0.06), Vector3(hit.position.x + fwd.x * 0.06, feet.y + 0.3, hit.position.z + fwd.z * 0.06), solid)
+					vault_peak = maxf(top.y, rim.position.y if not rim.is_empty() else top.y) + 0.15
 					vault_dur = 0.38 if rise < 1.5 else 0.9
 					vault_kind = "vault" if rise < 1.5 else "climb"
 		# or a sill at waist height with nothing above it and a floor beyond: a window with no glass

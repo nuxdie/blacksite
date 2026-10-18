@@ -39,6 +39,17 @@ static var _cache: Dictionary = {}
 static func get_mat(key: String) -> Material:
 	if _cache.has(key):
 		return _cache[key]
+	if key == "glass":
+		# real glass: see-through with a faint cold tint and a hard reflective face
+		var g := StandardMaterial3D.new()
+		g.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		g.albedo_color = Color(0.62, 0.74, 0.82, 0.2)
+		g.metallic = 0.4
+		g.roughness = 0.04
+		g.specular = 0.8
+		g.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_cache[key] = g
+		return g
 	var d: Dictionary = DEFS.get(key, DEFS["concrete"])
 	var m := ShaderMaterial.new()
 	m.shader = SURFACE

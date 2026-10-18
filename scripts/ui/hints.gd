@@ -38,6 +38,7 @@ var defs: Array[Dictionary] = [
 	{"id": "drag", "keys": ["interact"], "text": "Hold near a body to drag it out of sight", "trigger": "kill"},
 	{"id": "axe", "keys": ["interact"], "text": "The axe breaks down a door whose reader is dead, or smashes a window to climb through — loud either way", "trigger": "axe"},
 	{"id": "through", "keys": ["jump"], "text": "A window with no glass in it is a way in", "trigger": "window_open"},
+	{"id": "truck", "keys": [], "text": "Deliveries come and go through the vehicle gate. Lie flat in the back of the truck and it carries you in, or out", "trigger": "truck_near", "info": true},
 	{"id": "calibers", "keys": [], "text": "Guards drop their own weapons. Rounds only fit weapons of the same caliber", "trigger": "scavenge_seen", "info": true},
 	{"id": "fire_mode", "keys": ["fire_mode"], "text": "Semi-auto for long-range control", "trigger": "long_bursts"},
 	{"id": "bleeding", "keys": ["bandage"], "text": "You're bleeding — wounds don't close on their own", "trigger": "bleeding"},
@@ -104,6 +105,8 @@ func _condition(trigger: String) -> bool:
 			return _any(func(s: Soldier) -> bool: return s.state != Soldier.State.COMBAT and s.aware > 0.05)
 		"noticed_or_late":
 			return not p.crouched and (game.time > 14.0 or _any(func(s: Soldier) -> bool: return s.aware > 0.05))
+		"truck_near":
+			return _events.has("truck") and game.facility.vehicles.any(func(t: Truck) -> bool: return t.state != Truck.State.AWAY and t.global_position.distance_to(p.global_position) < 40.0)
 		"window_open":
 			return p.vault_ok and p.vault_kind == "through"
 		"prone_time":

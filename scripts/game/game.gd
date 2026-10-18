@@ -177,6 +177,11 @@ func start_mission() -> void:
 	facility.reset_props()
 	for pn in facility.panes:
 		pn.game = self
+	for t in facility.vehicles:
+		t.game = self
+		for d in facility.doors:
+			if d.label == "VEHICLE GATE":
+				t.gate = d
 	player.has_axe = false
 	fx.clear()
 	for r: Dictionary in ROSTER:
@@ -202,6 +207,7 @@ func start_mission() -> void:
 	act = {}
 	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
 	_spotted_t = -9.0
+	_last_line_t = -9.0
 	Sfx.set_muffle(0.0)
 	for id: String in ["tool", "use", "copy", "term"]:
 		Sfx.stop_loop(id, 400.0)
@@ -447,6 +453,9 @@ func _tick_mission(dt: float) -> void:
 	if mission == "extract":
 		_beacon.rotate_y(dt * 0.5)
 		if player.alive and Vector2(player.global_position.x - facility.extraction.x, player.global_position.z - facility.extraction.z).length() < 4.0:
+			_complete()
+		# or out through the vehicle gate, on foot or in the back of the truck
+		elif player.alive and player.global_position.z < -38.0 and absf(player.global_position.x + 8.5) < 6.0:
 			_complete()
 
 
@@ -1139,6 +1148,8 @@ func _tick_devices(dt: float) -> void:
 	for d in facility.doors:
 		d.tick(dt, self)
 	facility.tick_searchlights(dt)
+	for t in facility.vehicles:
+		t.tick(dt)
 	trace = maxf(0.0, trace - dt * (0.4 if tablet_access else 1.5))
 	use_target = find_use_target()
 	act = focus()
@@ -1308,6 +1319,16 @@ func tablet_input(event: InputEvent) -> bool:
 	if console.phase == NetConsole.Phase.LOGIN:
 		if k.keycode == KEY_ESCAPE:
 			close_tablet()
+		return true
+	if k.ctrl_pressed:
+		# window keys: terminals open, close and switch
+		match k.keycode:
+			KEY_N: console.new_term()
+			KEY_W: console.close_term()
+			KEY_TAB: console.cycle(-1 if k.shift_pressed else 1)
+			KEY_1, KEY_2, KEY_3, KEY_4: console.focus_term(k.keycode - KEY_1)
+			_: return true
+		Sfx.ui("ui_move", -10.0)
 		return true
 	match k.keycode:
 		KEY_ENTER, KEY_KP_ENTER:

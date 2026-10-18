@@ -34,6 +34,7 @@ func _ready() -> void:
 	bm.size = size
 	_mesh.mesh = bm
 	_mesh.material_override = Mats.get_mat("glass")
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_mesh)
 
 

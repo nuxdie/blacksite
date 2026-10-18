@@ -15,6 +15,7 @@ var doors: Array[Door] = []
 var searchlights: Array[SpotLight3D] = []
 var ladders: Array[Ladder] = []
 var panes: Array[Pane] = []
+var vehicles: Array[Truck] = []
 var drones: Array[Drone] = []
 ## Crawlspaces (axis-aligned boxes) where moving makes a racket on sheet metal.
 var ducts: Array[AABB] = []
@@ -436,7 +437,7 @@ func apply_brightness() -> void:
 func _layout() -> void:
 	box(-56, -1, -42, 56, 0, 42, "asphalt")
 	wall("x", 36.5, -51, 51, 1, 4.5, [{"a": -42.0, "b": -40.6, "y0": 0.0, "y1": 1.25}], "block")
-	wall("x", -36.5, -51, 51, 1, 4.5, [], "block")
+	wall("x", -36.5, -51, 51, 1, 4.5, [{"a": -11.1, "b": -5.9, "y0": 0.0, "y1": 4.5}], "block")
 	wall("z", -50.5, -36, 36, 1, 4.5, [{"a": -30.3, "b": -28.3, "y0": 0.0, "y1": 4.5}], "block")
 	wall("z", 50.5, -36, 36, 1, 4.5, [], "block")
 	for b: Array in [[-51, 36, 51, 37], [-51, -37, 51, -36], [-51, -36, -50, -30.3], [-51, -28.3, -50, 36], [50, -36, 51, 36]]:
@@ -445,7 +446,7 @@ func _layout() -> void:
 	_outside()
 	_razor_wire()
 	wall("x", -20, -50, -14, 0.6, 2.4, [{"a": -48.0, "b": -44.5, "y0": 0.0, "y1": 2.4}], "block")
-	wall("x", -20, -8, 10, 0.6, 2.4, [], "block")
+	wall("x", -20, -6.5, 10, 0.6, 2.4, [], "block")
 
 	# warehouse (x 10..48, z -20..30)
 	box(10.25, 0, -19.75, 47.75, 0.02, 29.75, "concrete", false)
@@ -545,7 +546,7 @@ func _layout() -> void:
 	crate(-3, -8.4, 1.2)
 	crate(-4.8, -13.5, 1.0, 2.6, 1.3)
 	container(0, 3, 6, 5.4, "c_rust")
-	for b: Array in [[-13.5, -2.3, -10.5, -1.7], [-20.3, 4.5, -19.7, 7.5], [0.5, -6.3, 3.5, -5.7], [-27, -12.3, -24, -11.7], [3.7, 9, 4.3, 12]]:
+	for b: Array in [[-15.0, -2.3, -12.0, -1.7], [-20.3, 4.5, -19.7, 7.5], [0.5, -6.3, 3.5, -5.7], [-27, -12.3, -24, -11.7], [3.7, 9, 4.3, 12]]:
 		box(b[0], 0, b[1], b[2], 1.1, b[3], "concrete")
 	wall("x", -19, -14, -11, 0.2, 2.6, [win(-13.6, 2.2, 1.0, 2.2)], "plaster")
 	wall("x", -16, -14, -11, 0.2, 2.6, [door(-12.6, 1.2)], "plaster")
@@ -594,6 +595,7 @@ func _layout() -> void:
 
 	_vehicles()
 	_fire_points()
+	_traffic()
 	_furnish()
 	_watchtower()
 	_armory()
@@ -652,7 +654,8 @@ func _outside() -> void:
 	blocker(55.8, 0, -42.5, 56.5, 40, 42.5)
 	blocker(-56, 0, -42.5, 56, 40, -41.8)
 	blocker(-56, 0, 41.8, 56, 40, 42.5)
-	blocker(-51, 0, -41.8, 56, 40, -37)
+	blocker(-51, 0, -41.8, -12, 40, -37)
+	blocker(-5, 0, -41.8, 56, 40, -37)
 	blocker(51, 0, -37, 55.8, 40, 37)
 	for r: Array in [[-50.9, -30.9, 0.5, 0.35], [-50.2, -27.9, 0.4, 0.3], [-51.6, -28.7, 0.3, 0.25], [-49.6, -30.6, 0.35, 0.2], [-51.3, -31.5, 0.25, 0.2]]:
 		box(r[0] - r[2], 0, r[1] - r[2], r[0] + r[2], r[3], r[1] + r[2], "block", false)
@@ -755,10 +758,10 @@ func forklift(c: Vector2, along_x: bool) -> void:
 
 
 func _vehicles() -> void:
-	truck(Vector2(-6.0, -31.2), true, "c_blue")
+	truck(Vector2(-2.5, -31.2), true, "c_blue")
 	sedan(Vector2(-38.0, 15.5), false, "steel")
 	sedan(Vector2(-38.0, 21.5), false, "c_red")
-	sedan(Vector2(-11.0, -26.5), true, "metal")
+	sedan(Vector2(-19.5, -23.4), true, "metal")
 	forklift(Vector2(22.0, -1.5), false)
 	for p: Array in [[30.0, 18.0], [31.4, 18.0], [30.7, 19.3]]:
 		box(p[0] - 0.6, 0, p[1] - 0.5, p[0] + 0.6, 0.14, p[1] + 0.5, "wood")
@@ -912,11 +915,22 @@ func _doors() -> void:
 	_door(Door.make("WAREHOUSE NORTH", Vector3(20.8, 0, 30.0), "x", 1.6, "warehouse", M, "WAREHOUSE", 2.4))
 	_door(Door.make("FIRE ESCAPE", Vector3(48.0, 4.2, 10.7), "z", 1.4, "warehouse", M, "WAREHOUSE", 2.4))
 	_door(Door.make("DATA OFFICE", Vector3(41.7, 4.2, 24.5), "x", 1.4, "secure", S, "WAREHOUSE"))
+	_door(Door.make("VEHICLE GATE", Vector3(-8.5, 0, -36.5), "x", 5.2, "warehouse", M, "LOADING YARD", 4.4))
 
 
 func _door(d: Door) -> void:
 	add_child(d)
 	doors.append(d)
+
+
+## The delivery truck: in at the vehicle gate, up the lane past the gatehouse, into the bay.
+func _traffic() -> void:
+	var t := Truck.make(Truck.route([Vector3(-8.5, 0, -41.0), Vector3(-8.5, 0, 1.6), Vector3(17.0, 0, 1.6)], 4.5))
+	add_child(t)
+	vehicles.append(t)
+	for d in doors:
+		if d.label == "VEHICLE GATE":
+			t.gate = d
 
 
 ## Fire points: a red cabinet on the wall with the axe clipped beside it, an extinguisher at
@@ -1056,6 +1070,11 @@ func reset_props() -> void:
 		d.reset()
 	for pn in panes:
 		pn.reset()
+	for t in vehicles:
+		t.state = Truck.State.AWAY
+		t.next_t = 70.0
+		t.visible = false
+		t.speed = 0.0
 	for sl in searchlights:
 		sl.visible = true
 	for d in drones:
