@@ -397,6 +397,7 @@ func _autotest() -> void:
 	r["quicksave"] = await _quicksave()
 	r["vertical"] = await _vertical()
 	r["fairness"] = await _fairness()
+	r["drones"] = await _drones()
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -425,6 +426,70 @@ func _autotest() -> void:
 	game.god_mode = true
 	r["ms"] = Time.get_ticks_msec() - t0
 	print("AUTOTEST ", JSON.stringify(r))
+
+
+## Drones: scan from above, raise the alarm, grounded by comms-down, shot down, and no sight
+## through walls or roofs.
+func _drones() -> Dictionary:
+	var c := {}
+	await _fresh("carbine")
+	_isolate([])
+	var d: Drone = game.facility.drones[0]
+	var p := game.player
+	# park the drone and stand lit, in the open, under it: it should spot and track
+	d.mode = Drone.Mode.PATROL
+	d.route = [Vector3(-10, 5.6, -8)]
+	d._i = 0
+	d._target = d.route[0]
+	d.position = Vector3(-10, 5.6, -8)
+	p.global_position = Vector3(-10, 0, -8)
+	p.crouch_toggle = false
+	var tracked := false
+	for _i in 60 * 8:
+		await get_tree().physics_frame
+		Input.action_press("move_right") if _i % 40 < 20 else Input.action_press("move_left")
+		if d.mode == Drone.Mode.TRACK:
+			tracked = true
+			break
+	Input.action_release("move_right")
+	Input.action_release("move_left")
+	c["drone_tracks_in_open"] = tracked
+	c["alarm_from_drone"] = Command.Level.keys()[game.hq.level]
+	# a roof blocks the drone: stand indoors under the office roof
+	await _fresh("carbine")
+	d = game.facility.drones[0]
+	_isolate([])
+	d.route = [Vector3(-21, 5.6, 20)]
+	d._i = 0
+	d._target = d.route[0]
+	d.position = Vector3(-21, 5.6, 20)
+	p.global_position = Vector3(-21, 0, 20)
+	var saw := false
+	for _i in 60 * 3:
+		await get_tree().physics_frame
+		saw = saw or d.sees_player
+	c["drone_blocked_by_roof"] = not saw
+	# comms-down grounds it: returns to home
+	await _fresh("carbine")
+	d = game.facility.drones[0]
+	d.mode = Drone.Mode.PATROL
+	game.comms_down = true
+	await _frames(60 * 6)
+	c["grounded_on_comms_down"] = d.mode == Drone.Mode.RETURN and d.global_position.distance_to(d.home) < 1.0
+	# shoot it down
+	await _fresh("carbine")
+	d = game.facility.drones[0]
+	_isolate([])
+	d.route = [Vector3(-10, 5.6, -8)]
+	d._i = 0
+	d._target = d.route[0]
+	d.position = Vector3(-10, 5.6, -8)
+	p.global_position = Vector3(-10, 0, -14)
+	await _frames(5)
+	_look_at(d.global_position)
+	await _fire(12)
+	c["drone_shot_down"] = d.destroyed
+	return c
 
 
 ## Detection has to be explainable: no light through walls, no sight through doors, footsteps
@@ -754,6 +819,7 @@ func _shots(dir: String) -> void:
 		["ladder", Vector3(14.0, 0, 2.5), PI, 0.3],
 		["duct", Vector3(-30.85, 0, 14.5), PI, 0.0],
 		["hatch", Vector3(-13.0, 0, 28.8), PI, 0.55],
+		["drone", Vector3(-10, 0, 2), 0.0, 0.45],
 		["fire_escape", Vector3(49.1, 0, -12), 0.0, 0.15],
 		["culvert", Vector3(-41.3, 0, 32), 0.0, -0.1],
 		["data_door", Vector3(41.7, 4.2, 20.5), 0.0, 0.0],
@@ -764,6 +830,11 @@ func _shots(dir: String) -> void:
 		["roof", Vector3(-2, 3.7, 14), 1.2, -0.2],
 	]
 	for v: Array in views:
+		if v[0] == "drone":
+			var dr: Drone = game.facility.drones[0]
+			dr.position = Vector3(-10, 5.6, -4)
+			dr.mode = Drone.Mode.TRACK
+			dr._led.emission = Color("ff3020")
 		game.player.global_position = v[1]
 		game.player.yaw = v[2]
 		game.player.pitch = v[3]

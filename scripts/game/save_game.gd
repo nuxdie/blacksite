@@ -67,6 +67,7 @@ static func capture(game: Game) -> Dictionary:
 		"soldiers": soldiers,
 		"devices": game.facility.devices.map(func(dv: Device) -> Dictionary: return dv.save_state()),
 		"lamps": game.facility.lamps.map(func(l: Lamp) -> Array: return [l.dead, l.powered]),
+		"drones": game.facility.drones.map(func(dr: Drone) -> Dictionary: return {"pos": dr.position, "destroyed": dr.destroyed, "down": dr.down_t, "hp": dr.hp, "mode": dr.mode, "aware": dr.aware, "i": dr._i}),
 		"pickups": pickups,
 	}
 
@@ -105,6 +106,19 @@ static func restore(game: Game, d: Dictionary) -> void:
 			l.fixture_mat.emission_energy_multiplier = 0.0
 		if not lamps[i][1]:
 			l.power_off()
+	var drones: Array = d.get("drones", [])
+	for i in mini(drones.size(), game.facility.drones.size()):
+		var dr := game.facility.drones[i]
+		var e: Dictionary = drones[i]
+		dr.position = e.pos
+		dr.destroyed = e.destroyed
+		dr.down_t = e.down
+		dr.hp = e.hp
+		dr.mode = e.mode
+		dr.aware = e.aware
+		dr._i = e.i
+		if dr.destroyed:
+			dr._cone.visible = false
 	for r: Dictionary in d.repairs:
 		if int(r.device) >= 0:
 			game._repairs.append({"device": game.facility.devices[int(r.device)], "t": r.t})

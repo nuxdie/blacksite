@@ -134,6 +134,18 @@ func _build_bank() -> void:
 		var wav := Synth.render(defs[key])
 		ResourceSaver.save(wav, path)
 		bank[key] = wav
+	_build_loop("drone_hum", [_t("saw", 150, 150, 1.0, 0.06, 0.0, 0.05), _t("saw", 226, 226, 1.0, 0.04, 0.0, 0.05), _n(1.0, 0.03, "bp", 1800, -1, 2.0)], 1.0)
+
+
+## A looping world sound (drone rotor hum).
+func _build_loop(key: String, layers: Array, length: float) -> void:
+	var path := CACHE_DIR + key + ".res"
+	if ResourceLoader.exists(path):
+		bank[key] = load(path)
+		return
+	var wav := Synth.render(layers, true, length)
+	ResourceSaver.save(wav, path)
+	bank[key] = wav
 
 
 func _start_ambience() -> void:

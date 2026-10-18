@@ -24,6 +24,7 @@ var defs: Array[Dictionary] = [
 	{"id": "cameras", "keys": [], "text": "Cameras are wired to a security network — get to an access point to deal with them", "trigger": "camera_in_view", "info": true},
 	{"id": "network", "keys": [], "text": "Junction boxes, the server cabinet and the booth terminal all reach the camera network", "trigger": "access_near", "info": true},
 	{"id": "badge", "keys": [], "text": "Badges open doors at their access level. A security badge also logs into the cameras without a trace", "trigger": "badge", "info": true},
+	{"id": "drone", "keys": [], "text": "A patrol drone scans from above — light cones give it away. Shoot it down, or cut comms to ground it", "trigger": "drone_seen", "info": true},
 	{"id": "relay", "keys": [], "text": "Their radio runs through the relay on the office roof. Sabotage it and alarms go nowhere — until someone fixes it", "trigger": "camera_alarm", "info": true},
 	{"id": "lean", "keys": ["lean_left", "lean_right"], "text": "Lean out from cover", "trigger": "combat"},
 	{"id": "sprint", "keys": ["sprint"], "text": "Sprint — guards hear it", "trigger": "late_quiet"},
@@ -139,7 +140,9 @@ func _condition(trigger: String) -> bool:
 			return game.use_target != null and game.use_target.kind == Device.Kind.ACCESS
 		"badge":
 			return _events.has("badge")
-		"camera_alarm":
+		"drone_seen":
+			return game.facility.drones.any(func(d: Drone) -> bool: return d.scanning() and d.global_position.distance_to(game.player.global_position) < 24.0 and not game.player.camera.is_position_behind(d.global_position))
+		"drone_alarm", "camera_alarm":
 			return _events.has("camera_alarm") and not game.comms_down
 		"penetrated":
 			return _events.has("penetrated")

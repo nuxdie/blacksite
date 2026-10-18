@@ -14,6 +14,7 @@ var devices: Array[Device] = []
 var doors: Array[Door] = []
 var searchlights: Array[SpotLight3D] = []
 var ladders: Array[Ladder] = []
+var drones: Array[Drone] = []
 ## Crawlspaces (axis-aligned boxes) where moving makes a racket on sheet metal.
 var ducts: Array[AABB] = []
 ## Insertion and extraction: outside the west wall, through a breach in it.
@@ -555,6 +556,7 @@ func _layout() -> void:
 	_furnish()
 	_watchtower()
 	_armory()
+	_drones()
 	_doors()
 	# a crate against the loading yard wall: a way over into the main yard
 	crate(-36.0, -21.0, 1.3)
@@ -840,6 +842,17 @@ func _armory() -> void:
 	add_pickup(Pickup.Kind.FRAG, Vector3(-10.65, 0.9, 29.0))
 
 
+## Two security quadrotors on automated patrols: one over the yards, one over the warehouse.
+func _drones() -> void:
+	_drone(Drone.make("DRONE-1", [[-24, -14], [-3, -1], [2, 16], [-20, 10], [-34, -8]], 5.6))
+	_drone(Drone.make("DRONE-2", [[16, -14], [36, -14], [36, 20], [18, 16]], 7.2))
+
+
+func _drone(d: Drone) -> void:
+	add_child(d)
+	drones.append(d)
+
+
 func _doors() -> void:
 	var M := Door.Lock.MAGLOCK
 	var S := Door.Lock.STRIKE
@@ -946,6 +959,8 @@ func reset_props() -> void:
 		d.reset()
 	for sl in searchlights:
 		sl.visible = true
+	for d in drones:
+		d.reset()
 	for l in lamps:
 		l.dead = false
 		l.powered = true

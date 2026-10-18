@@ -366,6 +366,8 @@ func _physics_process(dt: float) -> void:
 	_tick_pickups()
 	_tick_radio()
 	_tick_devices(sdt)
+	for dr in facility.drones:
+		dr.tick(sdt, self)
 	hq.tick(sdt)
 	_tick_mission(sdt)
 
@@ -382,6 +384,9 @@ func _flashlights() -> Array:
 	for s in soldiers:
 		if s.alive and s.model.flashlight.visible:
 			out.append(s.model.flashlight)
+	for dr in facility.drones:
+		if dr.scanning() and dr._cone.visible:
+			out.append(dr._cone)
 	return out
 
 
@@ -580,6 +585,13 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 				if t3 >= 0.0 and t3 < lt:
 					best = {"t": t3, "camera": c}
 					lt = t3
+			for dr in facility.drones:
+				if dr.destroyed:
+					continue
+				var t4 := Ballistics.ray_sphere(oo, dd, dr.global_position, 0.26)
+				if t4 >= 0.0 and t4 < lt:
+					best = {"t": t4, "drone": dr}
+					lt = t4
 			return best,
 		func(pt: Vector3, n: Vector3, is_exit: bool, mat: String) -> void:
 			fx.hole(pt, n)
@@ -613,6 +625,10 @@ func player_shot(o: Vector3, d: Vector3, w: WeaponData, first := true) -> void:
 		return
 	if tgt.has("lamp"):
 		_break_lamp(tgt.lamp)
+		return
+	if tgt.has("drone"):
+		(tgt.drone as Drone).take_hit(w.damage)
+		fx.burst("spark", end)
 		return
 	if tgt.has("camera"):
 		var cam: Device = tgt.camera
@@ -901,6 +917,33 @@ func _tick_devices(dt: float) -> void:
 					break
 
 
+## A drone just confirmed you: same as a camera alarm, HQ raises the alarm if comms are up.
+func drone_alarm(dr: Drone) -> void:
+	Sfx.play_at("alarm", dr.global_position, 0.0, false)
+	hud.hint_event("drone_alarm")
+	if comms_down:
+		return
+	hud.subtitle("SECURITY", "%s has eyes on the intruder." % dr.label)
+	_dispatch(player.global_position, "saw")
+	hq.camera_contact(player.global_position)
+
+
+func drone_report(_dr: Drone) -> void:
+	if comms_down:
+		return
+	for sq: Squad in squads.values():
+		if sq.alive_members().any(func(m: Soldier) -> bool: return m.state == Soldier.State.COMBAT):
+			sq.report(player.global_position, time)
+
+
+func drone_destroyed(dr: Drone, was_watching: bool) -> void:
+	Sfx.play_at("glass", dr.global_position)
+	if was_watching and not comms_down:
+		# losing a drone mid-track is a report in itself
+		_dispatch(NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, dr.global_position), "investigate", 1)
+		hq.caution("drone lost")
+
+
 func cameras() -> Array[Device]:
 	var out: Array[Device] = []
 	for dv in facility.devices:
@@ -1050,6 +1093,22 @@ func requeue_repair(dv: Device) -> void:
 	_repairs.append({"device": dv, "t": time + 15.0})
 
 
+## Send the nearest patrolling drone to look at a position.
+func dispatch_drone(pos: Vector3) -> void:
+	if comms_down:
+		return
+	var best: Drone = null
+	var bd := INF
+	for dr in facility.drones:
+		if dr.scanning() and dr.mode == Drone.Mode.PATROL:
+			var d := dr.global_position.distance_to(pos)
+			if d < bd:
+				bd = d
+				best = dr
+	if best:
+		best.investigate(pos)
+
+
 ## HQ sends the nearest guards to a contact.
 func dispatch_to(pos: Vector3, count: int) -> void:
 	var near := soldiers.filter(func(s: Soldier) -> bool: return s.alive and s.state != Soldier.State.COMBAT and s.task.is_empty())
@@ -1136,6 +1195,7 @@ func camera_alarm(cam: Device) -> void:
 		return
 	hud.subtitle("SECURITY", "Intruder on %s." % cam.label)
 	_dispatch(player.global_position, "saw")
+	dispatch_drone(player.global_position)
 	hq.camera_contact(player.global_position)
 
 

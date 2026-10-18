@@ -404,6 +404,13 @@ func status_items() -> Array:
 	for dv in game.facility.devices:
 		if dv.camera_live() and dv.sees_player and dv.aware > 0.1:
 			camera_on = true
+	var drone_tracking := false
+	for dr in game.facility.drones:
+		if dr.scanning() and dr.sees_player and dr.aware > 0.1:
+			if dr.mode == Drone.Mode.TRACK:
+				drone_tracking = true
+			else:
+				camera_on = true
 	if spotted:
 		out.append(["SPOTTED", Style.RED])
 	elif hunted:
@@ -411,8 +418,10 @@ func status_items() -> Array:
 	elif top:
 		var why: String = {"lit": "YOU'RE LIT", "close": "TOO CLOSE", "seen": "IN THEIR VIEW", "heard": "TOO LOUD"}.get(top.notice, "")
 		out.append(["BEING NOTICED  ·  " + why, Style.AMBER])
-	if camera_on and not spotted:
-		out.append(["CAMERA ON YOU", Style.AMBER])
+	if drone_tracking:
+		out.append(["DRONE TRACKING YOU", Style.RED])
+	elif camera_on and not spotted:
+		out.append(["EYES ON YOU", Style.AMBER])
 	match game.hq.level:
 		Command.Level.CAUTION:
 			out.append(["SITE ON CAUTION", Style.AMBER])
@@ -556,6 +565,14 @@ func _draw_arcs(c: Vector2) -> void:
 		var a := _screen_angle(s.global_position + Vector3.UP * 1.5)
 		_overlay.draw_arc(c, 100.0, a - 0.16, a + 0.16, 12, Color(col, 0.18), 4.0)
 		_overlay.draw_arc(c, 100.0, a - 0.16 * amt, a + 0.16 * amt, 12, Color(col, 0.95), 4.0)
+	for dr in game.facility.drones:
+		if not dr.scanning() or dr.aware <= 0.03:
+			continue
+		var dcol := Style.RED if dr.mode == Drone.Mode.TRACK else Style.AMBER
+		var damt := minf(1.0, dr.aware)
+		var da := _screen_angle(dr.global_position)
+		_overlay.draw_arc(c, 114.0, da - 0.1, da + 0.1, 10, Color(dcol, 0.18), 3.0)
+		_overlay.draw_arc(c, 114.0, da - 0.1 * damt, da + 0.1 * damt, 10, Color(dcol, 0.95), 3.0)
 	for dv in game.facility.devices:
 		if not dv.camera_live():
 			continue
