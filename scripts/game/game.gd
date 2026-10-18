@@ -88,6 +88,9 @@ var _repairs: Array[Dictionary] = []
 var _body_scan_t := 0.0
 var hq := Command.new(self)
 var console := NetConsole.new()
+## Multitool action in progress: {kind, door|soldier, time, label}, and its 0..1 progress.
+var tool_target: Dictionary = {}
+var tool_progress := 0.0
 
 
 func _ready() -> void:
@@ -190,6 +193,8 @@ func start_mission() -> void:
 	hq.reset()
 	console.game = self
 	console.close()
+	tool_target = {}
+	tool_progress = 0.0
 	stats = {"hacks": 0, "shots": 0, "hits": 0, "heads": 0, "kills": 0, "takedowns": 0, "damage_taken": 0.0, "enemy_shots": 0, "enemy_hits": 0}
 	player.spawn(facility.player_start, facility.player_start_yaw)
 	player.active = true
@@ -901,7 +906,12 @@ func _tick_devices(dt: float) -> void:
 				use_target = null
 				using = false
 				dv.on_used(self)
-	player.hacking = using
+	if not using:
+		_tick_tool(dt)
+	else:
+		tool_target = {}
+		tool_progress = 0.0
+	player.hacking = using or not tool_target.is_empty()
 	if tablet_access:
 		_tick_tablet()
 	_tick_repairs()
@@ -1228,6 +1238,87 @@ func _dispatch(pos: Vector3, how: String, count := 3) -> void:
 			s.alert(pos, how if how == "body" else "radio")
 
 
+## What the multitool can do where you're looking: clone a badge off an unaware guard or a body,
+## or splice a secured door's reader open. Nothing if a takedown, device or pickup is in reach.
+func tool_action() -> Dictionary:
+	if not player.alive or player.in_tablet or player.drag_body or player.ladder:
+		return {}
+	if takedown_target() or (use_target and use_target.can_use(self)):
+		return {}
+	var eye := player.eye_pos()
+	var fwd := player.view_dir()
+	# clone a badge: an unaware guard close in front, or a body
+	var clone: Soldier = null
+	var cbd := 2.8
+	for s in soldiers:
+		if s.badge.is_empty():
+			continue
+		# clone off a body, or off a guard who can't see you (not a takedown target here anyway)
+		var live_ok := s.alive and s.state != Soldier.State.COMBAT and not s.sees and s != takedown_target()
+		if not (live_ok or (not s.alive and s.death_t > 0.5)):
+			continue
+		var to := s.global_position + Vector3.UP * (1.0 if s.alive else 0.3) - eye
+		var d := to.length()
+		if d > cbd or to.normalized().dot(fwd) < 0.5:
+			continue
+		if not access_covers(s.badge):
+			cbd = d
+			clone = s
+	if clone:
+		return {"kind": "clone", "soldier": clone, "time": 2.2, "label": "Clone badge  ·  %s" % clone.badge.map(func(a: String) -> String: return a.to_upper())[0]}
+	# splice a door reader you can't badge through
+	var d2 := refused_door()
+	if d2 and d2.reader_live():
+		return {"kind": "splice", "door": d2, "time": 6.0 if d2.lock == Door.Lock.STRIKE else 9.0, "label": "Splice reader  ·  %s" % NetConsole._slug(d2.label)}
+	return {}
+
+
+## Do our access levels already include all of these?
+func access_covers(levels: Array) -> bool:
+	for a: String in levels:
+		if not access.has(a):
+			return false
+	return true
+
+
+func _tick_tool(dt: float) -> void:
+	var act := tool_action()
+	if act.is_empty() or not Input.is_action_pressed("interact"):
+		tool_target = {}
+		tool_progress = 0.0
+		return
+	# same action continuing?
+	if tool_target.get("kind") != act.kind or tool_target.get("door") != act.get("door") or tool_target.get("soldier") != act.get("soldier"):
+		tool_target = act
+		tool_progress = 0.0
+	tool_progress += dt / float(act.time)
+	if tool_progress >= 1.0:
+		_finish_tool(act)
+		tool_target = {}
+		tool_progress = 0.0
+
+
+func _finish_tool(act: Dictionary) -> void:
+	match act.kind:
+		"clone":
+			var s: Soldier = act.soldier
+			for a: String in s.badge:
+				access[a] = true
+			hud.toast("BADGE CLONED  ·  " + "  ·  ".join(s.badge.map(func(a: String) -> String: return a.to_upper())))
+			Sfx.play("pickup")
+			hud.hint_event("badge")
+		"splice":
+			var d: Door = act.door
+			d.unlocked = true
+			add_trace(10.0, "Reader spliced: %s" % d.label)
+			Sfx.play_at("deny", d.global_position + Vector3.UP, -4.0)
+			hud.toast("%s  ·  READER SPLICED" % d.label)
+			# shorting a reader is noticed if a camera or guard sees it
+			for o in soldiers:
+				if o.alive and o.state == Soldier.State.CALM and o.global_position.distance_to(d.global_position) < 6.0 and o.sees:
+					o.make_suspicious(d.global_position, 0.6, "huh")
+
+
 func takedown_target() -> Soldier:
 	if not player.alive or player.drag_body:
 		return null
@@ -1327,16 +1418,7 @@ func _tick_pickups() -> void:
 	for p in facility.pickups:
 		if p.taken or not p.is_auto() or p.global_position.distance_to(player.global_position) > 1.3:
 			continue
-		if p.kind == Pickup.Kind.BADGE:
-			var new_levels := p.access.filter(func(a: String) -> bool: return not access.has(a))
-			if new_levels.is_empty():
-				continue
-			for a: String in p.access:
-				access[a] = true
-			hud.toast("BADGE  ·  " + "  ·  ".join(new_levels.map(func(a: String) -> String: return a.to_upper())) + " ACCESS")
-			hud.hint_event("badge")
-			Sfx.play("pickup")
-		elif p.kind == Pickup.Kind.ROUNDS:
+		if p.kind == Pickup.Kind.ROUNDS:
 			var used := player.weapons.take_rounds(p.caliber, p.amount)
 			if used == 0:
 				continue
@@ -1402,8 +1484,6 @@ func on_soldier_killed(s: Soldier, headshot: bool, takedown: bool) -> void:
 	var side := Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5))
 	facility.place(Pickup.dropped_weapon(s.global_position + side, data, clampi(s.mag, 0, data.mag_size), []))
 	facility.place(Pickup.rounds(s.global_position - side * 0.6, data.caliber, s.profile.carried_rounds))
-	if not s.badge.is_empty():
-		facility.place(Pickup.badge(s.global_position + Vector3(-0.3, 0, 0.3), s.badge))
 	if s.grenades > 0 and randf() < 0.6:
 		facility.add_pickup(Pickup.Kind.FRAG, s.global_position + Vector3(0.3, 0, 0.2), 1, false)
 	if not takedown:

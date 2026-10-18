@@ -52,7 +52,7 @@ func _ready() -> void:
 
 ## Collected by walking over it rather than by pressing interact.
 func is_auto() -> bool:
-	return kind == Kind.ROUNDS or kind == Kind.FRAG or kind == Kind.BADGE
+	return kind == Kind.ROUNDS or kind == Kind.FRAG
 
 
 func label() -> String:

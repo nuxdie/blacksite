@@ -297,15 +297,20 @@ func _autotest() -> void:
 	await _frames(60 * 22)
 	hk["repair_dispatched"] = cams[2].repair_pending or not cams[2].disabled
 	hk["repair_debug"] = {"combat": game.soldiers.filter(func(x: Soldier) -> bool: return x.alive and x.state == Soldier.State.COMBAT).size(), "tasks": game.soldiers.filter(func(x: Soldier) -> bool: return not x.task.is_empty()).size(), "repairs": game._repairs.size(), "alarm": Command.Level.keys()[game.hq.level]}
-	# badge: the booth guard carries one; with it the terminal logs in cleanly
+	# badge: take down the booth guard, clone their security badge off the body with the multitool
 	await _fresh("carbine")
 	var booth := _find("yard", -12.5)
 	booth.die(Vector3.FORWARD, false, true)
+	booth.global_position = Vector3(-5, 0, -10)
 	await _frames(60)
-	for p in game.facility.pickups:
-		if not p.taken and p.kind == Pickup.Kind.BADGE:
-			game.player.global_position = p.global_position
-	await _frames(10)
+	game.player.global_position = Vector3(-5, 0, -9.0)
+	await _frames(3)
+	_look_at(Vector3(-5, 0.3, -10))
+	await _frames(3)
+	hk["clone_offered"] = game.tool_action().get("kind") == "clone"
+	Input.action_press("interact")
+	await _frames(int(2.2 * 60.0) + 10)
+	Input.action_release("interact")
 	hk["has_badge"] = game.has_badge
 	var term := _device("SECURITY TERMINAL")
 	game.player.global_position = Vector3(-12.5, 0, -17.2)
@@ -405,6 +410,7 @@ func _autotest() -> void:
 	r["vertical"] = await _vertical()
 	r["fairness"] = await _fairness()
 	r["drones"] = await _drones()
+	r["multitool"] = await _multitool()
 	# duel: one rifleman engages a player standing in the open 15 m away
 	await _fresh("carbine")
 	e = _find("yard", -10.0)
@@ -433,6 +439,41 @@ func _autotest() -> void:
 	game.god_mode = true
 	r["ms"] = Time.get_ticks_msec() - t0
 	print("AUTOTEST ", JSON.stringify(r))
+
+
+## Splicing a door reader: offered only at a secured door you can't badge, opens it, costs trace.
+func _multitool() -> Dictionary:
+	var c := {}
+	await _fresh("carbine")
+	_isolate([])
+	var p := game.player
+	var d: Door = game.facility.doors[1]
+	p.global_position = d.global_position + Vector3(0, 0, -0.9)
+	await _frames(3)
+	_look_at(d.global_position + Vector3.UP * 1.2)
+	await _frames(30)
+	c["refused"] = d.refused
+	c["splice_offered"] = game.tool_action().get("kind") == "splice"
+	var trace0 := game.trace
+	Input.action_press("interact")
+	await _frames(int(6.0 * 60.0) + 20)
+	Input.action_release("interact")
+	await _frames(40)
+	c["door_opened"] = d.unlocked and d.open_k > 0.5
+	c["trace_added"] = game.trace > trace0
+	# a dead reader cannot be spliced
+	await _fresh("carbine")
+	_isolate([])
+	d = game.facility.doors[1]
+	for dv in game.facility.devices:
+		if dv.kind == Device.Kind.BREAKER and dv.zone == "OFFICE":
+			dv.on_used(game)
+	p.global_position = d.global_position + Vector3(0, 0, -0.9)
+	await _frames(3)
+	_look_at(d.global_position + Vector3.UP * 1.2)
+	await _frames(30)
+	c["dead_reader_no_splice"] = game.tool_action().is_empty() and not d.reader_live()
+	return c
 
 
 ## Drones: scan from above, raise the alarm, grounded by comms-down, shot down, and no sight

@@ -366,13 +366,15 @@ func _draw_sights(c: Vector2) -> void:
 
 
 func _draw_hack(c: Vector2) -> void:
-	var u := game.use_target
-	if u:
-		var prog: float = game.use_progress.get(u, 0.0)
-		if prog > 0.0:
-			_overlay.draw_arc(c, 26.0, 0.0, TAU, 48, Color(1, 1, 1, 0.15), 3.0)
-			_overlay.draw_arc(c, 26.0, -PI / 2.0, -PI / 2.0 + TAU * prog, 48, Style.AMBER, 3.0)
-			_text(c + Vector2(0, 5), "%d" % roundi(prog * 100.0), 14, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
+	var prog := 0.0
+	if game.use_target:
+		prog = game.use_progress.get(game.use_target, 0.0)
+	elif not game.tool_target.is_empty():
+		prog = game.tool_progress
+	if prog > 0.0:
+		_overlay.draw_arc(c, 26.0, 0.0, TAU, 48, Color(1, 1, 1, 0.15), 3.0)
+		_overlay.draw_arc(c, 26.0, -PI / 2.0, -PI / 2.0 + TAU * prog, 48, Style.AMBER, 3.0)
+		_text(c + Vector2(0, 5), "%d" % roundi(prog * 100.0), 14, Style.AMBER, HORIZONTAL_ALIGNMENT_CENTER, _f_small)
 
 
 ## Where you are: named when you arrive, then it settles to a quiet label.
@@ -754,8 +756,11 @@ func _prompts() -> Array:
 		else:
 			out.append([[], u.use_label(game)])
 	var t := game.takedown_target()
+	var tool := game.tool_action()
 	if t:
 		out.append([["interact"], "Takedown"])
+	elif not tool.is_empty():
+		out.append([["interact"], tool.label + "  ·  hold"])
 	else:
 		var it := game.interact_target()
 		if it:
@@ -767,7 +772,7 @@ func _prompts() -> Array:
 	if game.facility.in_duct(p.global_position + p.forward() * 0.9) and not p.crouched and not game.facility.in_duct(p.global_position):
 		out.append([["crouch"], "Crouch to crawl in"])
 	var dr := game.refused_door()
-	if dr:
+	if dr and game.tool_action().get("kind") != "splice":
 		if not dr.reader_live():
 			out.append([[], "%s  ·  reader dead, door stays locked" % dr.label])
 		else:
