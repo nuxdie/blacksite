@@ -67,7 +67,7 @@ static func capture(game: Game) -> Dictionary:
 		"soldiers": soldiers,
 		"devices": game.facility.devices.map(func(dv: Device) -> Dictionary: return dv.save_state()),
 		"lamps": game.facility.lamps.map(func(l: Lamp) -> Array: return [l.dead, l.powered]),
-		"drones": game.facility.drones.map(func(dr: Drone) -> Dictionary: return {"pos": dr.position, "destroyed": dr.destroyed, "down": dr.down_t, "hp": dr.hp, "mode": dr.mode, "aware": dr.aware, "i": dr._i}),
+		"drones": game.facility.drones.map(func(dr: Drone) -> Dictionary: return {"pos": dr.position, "destroyed": dr.destroyed, "down": dr.down_t, "hp": dr.hp, "mode": dr.mode, "aware": dr.aware, "i": dr._i, "landed": dr.landed}),
 		"pickups": pickups,
 	}
 
@@ -116,6 +116,11 @@ static func restore(game: Game, d: Dictionary) -> void:
 		dr.hp = e.hp
 		dr.mode = e.mode
 		dr.aware = e.aware
+		dr.landed = e.get("landed", dr.destroyed)
+		if dr.destroyed:
+			dr._cone.visible = false
+			if dr._hum:
+				dr._hum.stop()
 		dr._i = e.i
 		if dr.destroyed:
 			dr._cone.visible = false

@@ -40,6 +40,31 @@ func _frames(n: int) -> void:
 		await get_tree().physics_frame
 
 
+## Teleport to the first point, then walk the rest in turn; true if every point was reached.
+func _walk(path: Array) -> bool:
+	var p := game.player
+	p.global_position = path[0]
+	p.velocity = Vector3.ZERO
+	await _frames(5)
+	for i in range(1, path.size()):
+		var goal: Vector3 = path[i]
+		var ok := false
+		Input.action_press("move_forward")
+		for _f in 400:
+			var to := goal - p.global_position
+			to.y = 0.0
+			if to.length() < 0.45 and absf(goal.y - p.global_position.y) < 0.5:
+				ok = true
+				break
+			p.yaw = atan2(-to.x, -to.z)
+			await get_tree().physics_frame
+		Input.action_release("move_forward")
+		await _frames(3)
+		if not ok:
+			return false
+	return true
+
+
 func _look_at(p: Vector3) -> void:
 	var pl := game.player
 	var d := p - pl.eye_pos()
@@ -614,6 +639,29 @@ func _drones() -> Dictionary:
 	_look_at(d.global_position)
 	await _fire(12)
 	c["drone_shot_down"] = d.destroyed
+	await _frames(180)
+	c["wreck_on_ground"] = d.landed and d.position.y < 1.0
+	# a hit that doesn't kill it: it dives at you and goes off
+	await _fresh("carbine")
+	d = game.facility.drones[0]
+	_isolate([])
+	d.route = [Vector3(-10, 5.6, -8)]
+	d._i = 0
+	d._target = d.route[0]
+	d.position = Vector3(-10, 5.6, -8)
+	p.global_position = Vector3(-10, 0, -14)
+	game.god_mode = false
+	await _frames(5)
+	d.take_hit(4.0)
+	c["dives_when_hit"] = d.mode == Drone.Mode.DIVE
+	var hp0 := p.hp
+	for _i in 240:
+		await get_tree().physics_frame
+		if d.destroyed:
+			break
+	c["dive_exploded"] = d.destroyed and not d._body.visible
+	c["dive_hurt"] = p.hp < hp0
+	game.god_mode = true
 	return c
 
 
@@ -678,6 +726,13 @@ func _fairness() -> Dictionary:
 		p.crouch_toggle = true
 		await _frames(60 * 5)
 		c["dark_crouched_5s"] = {"aware": snappedf(g.aware, 0.01), "state": Soldier.State.keys()[g.state]}
+		await _fresh("carbine")
+		g = _find("yard", -10.0)
+		_isolate([g])
+		p.global_position = dark
+		p.prone_toggle = true
+		await _frames(60 * 5)
+		c["dark_prone_5s"] = {"aware": snappedf(g.aware, 0.01), "state": Soldier.State.keys()[g.state], "prone": p.prone}
 	if lit != Vector3.INF:
 		await _fresh("carbine")
 		g = _find("yard", -10.0)
@@ -728,7 +783,17 @@ func _vertical() -> Dictionary:
 	var l: Ladder = game.facility.ladders[0]
 	p.global_position = l.bottom_exit()
 	await _frames(5)
-	c["ladder_prompt"] = game.ladder_near() == l
+	c["ladder_prompt"] = game.ladder_touch(-l.normal) == l
+	# walk into it: no key
+	_look_at(l.global_position + Vector3.UP * 1.5)
+	Input.action_press("move_forward")
+	await _frames(20)
+	Input.action_release("move_forward")
+	c["ladder_by_walking"] = p.ladder == l
+	p.ladder = null
+	p.ladder_cool = 0.0
+	p.global_position = l.bottom_exit()
+	await _frames(5)
 	p.grab_ladder(l)
 	Input.action_press("move_forward")
 	for _i in 300:
@@ -747,6 +812,12 @@ func _vertical() -> Dictionary:
 	await _frames(240)
 	Input.action_release("move_forward")
 	c["stairs_top_y"] = snappedf(p.global_position.y, 0.1)
+	# the east flight: up, then east through the rail gap onto the mezzanine
+	c["east_stairs"] = await _walk([Vector3(38.5, 0, -18.5), Vector3(38.5, 4.2, -7.5), Vector3(42.0, 4.2, -7.5)])
+	# the office roof flight: up, then north through the parapet gap onto the roof
+	c["roof_stairs"] = await _walk([Vector3(-27.0, 0, 33.4), Vector3(-17.0, 3.7, 33.4), Vector3(-17.0, 3.7, 30.0)])
+	# the catwalk corner: from the bay catwalk round onto the west one
+	c["catwalk_corner"] = await _walk([Vector3(16.0, 4.2, 6.8), Vector3(11.0, 4.2, 6.8), Vector3(11.0, 4.2, 12.0)])
 	# a guard sent to the catwalk takes the ladder
 	await _fresh("carbine")
 	var g := _find("wh", 14.0)

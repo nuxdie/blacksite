@@ -191,8 +191,8 @@ func refresh(dt: float) -> void:
 	if ammo_key != _ammo_seen:
 		_ammo_seen = ammo_key
 		_ammo_a = 4.0
-	var ammo_on := w.reload_t > 0.0 or p.ads > 0.5 or w.aiming_throw or w.mag[w.cur] <= w.current().mag_size * 0.25
-	_ammo_a = maxf(1.0 if ammo_on else 0.0, _ammo_a - dt)
+	# the weapon line and the count stay up: a shooter wants to know what's in hand at a glance
+	_ammo_a = 1.0
 	var vit_on := p.hp < 70.0 or p.bleed > 0.0 or p.leg_wound or p.bandage_t >= 0.0 or p.last_hit < 4.0
 	_vitals_a = minf(1.0, _vitals_a + dt * 4.0) if vit_on else maxf(0.0, _vitals_a - dt * 0.5)
 	# the frame itself warms when someone is interested in you, reddens when they are sure
@@ -741,7 +741,7 @@ func _draw_arcs(c: Vector2) -> void:
 ## How far your footsteps carry, the way the guards compute it.
 func _noise_reach() -> float:
 	var p := game.player
-	var loud := 11.0 if p.sprinting else (0.0 if p.crouched else (4.0 if p.speed_2d() > 1.0 else 0.0))
+	var loud := 11.0 if p.sprinting else (0.0 if p.crouched or p.prone else (4.0 if p.speed_2d() > 1.0 else 0.0))
 	if game.facility.in_duct(p.global_position) and p.speed_2d() > 0.4:
 		loud = maxf(loud, 7.0)
 	if game.hq.level == Command.Level.ALARM:
@@ -774,7 +774,7 @@ func _draw_self(size: Vector2) -> void:
 	x += 12.0
 	x += _micro(Vector2(x, y), noise_txt, noise_col) + 16.0
 	# stance
-	var stance := "DRAGGING" if p.drag_body else ("CROUCHED" if p.crouched else ("SPRINTING" if p.sprinting else "STANDING"))
+	var stance := "DRAGGING" if p.drag_body else ("PRONE" if p.prone else ("CROUCHED" if p.crouched else ("SPRINTING" if p.sprinting else "STANDING")))
 	if absf(p.lean_k) > 0.5:
 		stance += "  ·  LEAN " + ("L" if p.lean_k < 0.0 else "R")
 	_sep(x, y)
@@ -841,7 +841,7 @@ func _draw_hands(size: Vector2) -> void:
 			else:
 				_micro(Vector2(gx, y), t, col, HORIZONTAL_ALIGNMENT_RIGHT)
 				gx -= tw + 24
-	# ammunition, while it matters
+	# ammunition and the weapon in hand, always
 	var a := clampf(_ammo_a, 0.0, 1.0)
 	if a <= 0.01:
 		return
@@ -891,8 +891,8 @@ func _prompts() -> Array:
 	if game.tablet_access:
 		return out
 	if p.ladder:
-		out.append([["move_forward", "move_back"], "Climb"])
-		out.append([["interact"], "Let go"])
+		out.append([["move_forward", "move_back"], "Climb  ·  forward goes where you look"])
+		out.append([["jump"], "Let go"])
 		return out
 	if game.using and game.use_target:
 		out.append([["interact"], "Keep holding  ·  " + game.use_target.use_label(game)])
@@ -900,7 +900,7 @@ func _prompts() -> Array:
 	# one key, one thing: whatever focus() picked
 	var a := game.act
 	match a.get("kind", ""):
-		"takedown", "pickup", "ladder":
+		"takedown", "pickup":
 			out.append([["interact"], a.label])
 		"use":
 			if a.ok:
@@ -923,7 +923,7 @@ func _prompts() -> Array:
 	if junk:
 		out.append([[], "%s rounds  ·  none of your weapons take them" % junk.caliber])
 	if p.vault_ok:
-		out.append([["jump"], "Vault"])
+		out.append([["jump"], "Climb up" if p.vault_dur > 0.5 else "Vault"])
 	if p.crouched and p.low_cover_ahead and p.ads < 0.3:
 		out.append([["aim"], "Aim over cover"])
 	if p.is_scoped():

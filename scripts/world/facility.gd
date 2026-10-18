@@ -172,6 +172,17 @@ func stairs(x0: float, z0: float, x1: float, z1: float, base: float, top: float,
 		if rails:
 			var rail := deco(mid + off + Vector3.UP * 0.92, Vector3(length, 0.04, 0.04), steel)
 			rail.basis = flight
+			# and something to lean on: a solid slab the height of the rail, sloped with it
+			var body := StaticBody3D.new()
+			body.collision_layer = Layers.RAILING
+			body.collision_mask = 0
+			body.transform = Transform3D(flight, mid + off + Vector3.UP * 0.5)
+			var cs := CollisionShape3D.new()
+			var bs := BoxShape3D.new()
+			bs.size = Vector3(length, 1.0, 0.08)
+			cs.shape = bs
+			body.add_child(cs)
+			add_child(body)
 			for k in 3:
 				var t := (k + 0.5) / 3.0
 				var pc := start + along * run * t + off + Vector3.UP * (rise * t + 0.46)
@@ -179,7 +190,8 @@ func stairs(x0: float, z0: float, x1: float, z1: float, base: float, top: float,
 
 
 ## A catwalk: grating deck at a height with handrails along the given open sides.
-func catwalk(x0: float, z0: float, x1: float, z1: float, y: float, rail_sides: Array, gaps := []) -> void:
+## `trims` shortens a side's rail from its start by that many metres, where another walk joins.
+func catwalk(x0: float, z0: float, x1: float, z1: float, y: float, rail_sides: Array, gaps := [], trims := {}) -> void:
 	box(x0, y - 0.1, z0, x1, y, z1, "grating")
 	var steel := Mats.plain(Color("5d6166"), 0.45, 0.6)
 	for side: String in rail_sides:
@@ -190,6 +202,8 @@ func catwalk(x0: float, z0: float, x1: float, z1: float, y: float, rail_sides: A
 			"s": a = Vector3(x0, y, z1); b = Vector3(x1, y, z1)
 			"w": a = Vector3(x0, y, z0); b = Vector3(x0, y, z1)
 			"e": a = Vector3(x1, y, z0); b = Vector3(x1, y, z1)
+		if trims.has(side):
+			a += (b - a).normalized() * float(trims[side])
 		_rail(a, b, steel, gaps)
 	# hangers up to the roof trusses
 	var lx := absf(x1 - x0)
@@ -441,9 +455,10 @@ func _layout() -> void:
 	box(39.95, 4.2, -6, 40.05, 5.15, 6.0, "steel")
 	box(39.95, 4.2, 7.6, 40.05, 5.15, 22, "steel")
 	stairs(12, 10, 15, 22, 0, 4.2, "z", 1)
-	stairs(37, -19, 40, -6, 0, 4.2, "z", 1)
+	stairs(37, -19, 40, -9, 0, 4.2, "z", 1)
+	box(37, 3.9, -9, 40, 4.2, -6, "grating")
 	# catwalks: across the bay, and down the west wall to the north mezzanine
-	catwalk(10.25, 6.0, 40.0, 7.6, 4.2, ["n", "s"], [Vector3(14.0, 4.2, 6.0)])
+	catwalk(10.25, 6.0, 40.0, 7.6, 4.2, ["n", "s"], [Vector3(14.0, 4.2, 6.0)], {"s": 1.6})
 	catwalk(10.25, 7.6, 11.85, 22.0, 4.2, ["e"])
 	ladder(Vector3(14.0, 0, 6.0), 4.2, Vector3.FORWARD, 0.9)
 	wall("x", 24.5, 40.5, 47.75, 0.2, 2.6, [door(41, 1.4), win(44, 2.6, 1.0, 2.0)], "plaster", 4.2)
@@ -498,7 +513,8 @@ func _layout() -> void:
 	box(-0.1, 3.7, 12.1, 0.2, 4.6, 31.9, "concrete")
 	box(-22, 3.7, 20, -19, 5.0, 23, "metal")
 	box(-8, 3.7, 26, -6.5, 4.5, 29, "metal")
-	stairs(-28, 32.2, -16, 34.7, 0, 3.7, "x", 1)
+	stairs(-28, 32.2, -18.5, 34.7, 0, 3.7, "x", 1)
+	box(-18.5, 3.4, 32.2, -15.4, 3.7, 34.7, "grating")
 	for t: Array in [[-26, 16], [-20, 17.5], [-6, 15.5], [-25, 28], [-15, 29], [-5, 27]]:
 		box(t[0] - 0.8, 0, t[1] - 0.45, t[0] + 0.8, 0.78, t[1] + 0.45, "wood")
 	box(-29.6, 0, 13, -28.9, 1.9, 15.5, "metal")

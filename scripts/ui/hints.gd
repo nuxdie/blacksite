@@ -17,6 +17,7 @@ var _events: Dictionary = {}
 var defs: Array[Dictionary] = [
 	{"id": "move", "keys": ["move_forward", "move_left", "move_back", "move_right"], "text": "Move", "trigger": "start"},
 	{"id": "crouch", "keys": ["crouch"], "text": "Crouch — slower, quieter, harder to spot", "trigger": "noticed_or_late"},
+	{"id": "prone", "keys": ["prone"], "text": "Go prone — flat in the dark you're near invisible, and your aim steadies", "trigger": "prone_time"},
 	{"id": "awareness", "keys": [], "text": "Arcs around your sights show who is noticing you", "trigger": "noticed", "info": true},
 	{"id": "aim", "keys": ["aim"], "text": "Aim down sights", "trigger": "enemy_visible"},
 	{"id": "tracked", "keys": [], "text": "Guards you've seen stay tracked: a hollow marker shows where you last saw them", "trigger": "tracked_hidden", "info": true},
@@ -28,6 +29,7 @@ var defs: Array[Dictionary] = [
 	{"id": "badge", "keys": [], "text": "Badges open doors at their access level. A security badge also logs into the cameras without a trace", "trigger": "badge", "info": true},
 	{"id": "multitool", "keys": ["interact"], "text": "Hold to clone a guard's badge, or splice a locked reader with your multitool", "trigger": "tool_available"},
 	{"id": "drone", "keys": [], "text": "A patrol drone scans from above — light cones give it away. Shoot it down, or cut comms to ground it", "trigger": "drone_seen", "info": true},
+	{"id": "drone_dive", "keys": [], "text": "A wounded drone rams. Drop it before it reaches you, or break its line of sight", "trigger": "drone_dive", "info": true},
 	{"id": "relay", "keys": [], "text": "Their radio runs through the relay on the office roof. Sabotage it and alarms go nowhere — until someone fixes it", "trigger": "camera_alarm", "info": true},
 	{"id": "lean", "keys": ["lean_left", "lean_right"], "text": "Lean out from cover", "trigger": "combat"},
 	{"id": "sprint", "keys": ["sprint"], "text": "Sprint — guards hear it", "trigger": "late_quiet"},
@@ -100,6 +102,8 @@ func _condition(trigger: String) -> bool:
 			return _any(func(s: Soldier) -> bool: return s.state != Soldier.State.COMBAT and s.aware > 0.05)
 		"noticed_or_late":
 			return not p.crouched and (game.time > 14.0 or _any(func(s: Soldier) -> bool: return s.aware > 0.05))
+		"prone_time":
+			return p.crouched and not p.prone and game.time > 40.0 and _any(func(s: Soldier) -> bool: return s.aware > 0.05)
 		"enemy_visible":
 			return _any(func(s: Soldier) -> bool: return _in_view(s, 45.0))
 		"calm_enemy_visible":

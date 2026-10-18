@@ -327,7 +327,7 @@ func _perceive(dt: float) -> void:
 	if state == State.COMBAT:
 		return
 	if sees:
-		var stance := 0.45 if p.crouched else 1.0
+		var stance := 0.2 if p.prone else (0.45 if p.crouched else 1.0)
 		var hs := p.speed_2d()
 		var move := 0.45 if hs < 0.5 else (1.6 if p.sprinting else 1.0)
 		var center := clampf((fwd_dot - 0.2) / 0.7, 0.35, 1.0)
@@ -340,7 +340,7 @@ func _perceive(dt: float) -> void:
 		aware = maxf(0.0, aware - dt * 0.06)
 		if aware < 0.05:
 			notice = ""
-	var loud := 11.0 if p.sprinting else (0.0 if p.crouched else (4.0 if p.speed_2d() > 1.0 else 0.0))
+	var loud := 11.0 if p.sprinting else (0.0 if p.crouched or p.prone else (4.0 if p.speed_2d() > 1.0 else 0.0))
 	if game.hq.level == Command.Level.ALARM:
 		loud *= 0.5
 	if loud > 0.0 and global_position.distance_to(p.global_position) < loud:
@@ -616,7 +616,7 @@ func flee(g: Gadget) -> void:
 
 func _min_aim_err() -> float:
 	var p := game.player
-	return (0.014 + clampf(p.speed_2d() / Player.WALK, 0.0, 1.6) * 0.02 - p.crouch_k * 0.004 + supp * 0.05 + dist_p * 0.0004) * (2.0 if flinch > 0.0 else 1.0)
+	return (0.014 + clampf(p.speed_2d() / Player.WALK, 0.0, 1.6) * 0.02 - p.crouch_k * 0.004 - p.prone_k * 0.005 + supp * 0.05 + dist_p * 0.0004) * (2.0 if flinch > 0.0 else 1.0)
 
 
 func _try_shoot(dt: float, target: Vector3, extra := 0.0, suppressive := false) -> bool:

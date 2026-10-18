@@ -934,30 +934,35 @@ func _tick_gadgets(dt: float) -> void:
 					s.susp_t = minf(s.susp_t, 1.2)
 
 
+## An explosion: hurts everyone in the radius with a line to it, rattles everyone nearby.
+func blast(p: Vector3, radius: float, soldier_dmg: float, player_dmg: float, by_player: bool) -> void:
+	fx.explosion(p)
+	Sfx.play_at("explode", p, 4.0, false)
+	for s in soldiers:
+		if not s.alive:
+			continue
+		var c := s.global_position + Vector3.UP
+		var d := c.distance_to(p)
+		if d < radius and los(p, c):
+			s.take_hit(soldier_dmg * pow(1.0 - d / radius, 1.2), (c - p).normalized(), "body", by_player)
+	var pc := player.chest_pos()
+	var dp := pc.distance_to(p)
+	if dp < radius and los(p, pc):
+		player.take_damage(player_dmg * pow(1.0 - dp / radius, 1.3), p)
+	if dp < radius * 2.0:
+		player.supp = minf(1.0, player.supp + 0.8 * (1.0 - dp / (radius * 2.0)))
+	var cd := player.camera.global_position.distance_to(p)
+	if cd < 30.0:
+		player.trauma = minf(1.0, player.trauma + 0.6 * (1.0 - cd / 30.0))
+	hear_gunshot(p, 60.0)
+
+
 func _on_detonate(g: Gadget) -> void:
 	var p := g.global_position + Vector3.UP * 0.15
 	match g.type:
 		"frag":
-			fx.explosion(p)
 			fx.hole(g.global_position + Vector3.UP * 0.05, Vector3.UP, 9.0, true)
-			Sfx.play_at("explode", p, 4.0, false)
-			for s in soldiers:
-				if not s.alive:
-					continue
-				var c := s.global_position + Vector3.UP
-				var d := c.distance_to(p)
-				if d < 7.5 and los(p, c):
-					s.take_hit(190.0 * pow(1.0 - d / 7.5, 1.2), (c - p).normalized(), "body", g.owner_is_player)
-			var pc := player.chest_pos()
-			var dp := pc.distance_to(p)
-			if dp < 7.5 and los(p, pc):
-				player.take_damage(150.0 * pow(1.0 - dp / 7.5, 1.3), p)
-			if dp < 14.0:
-				player.supp = minf(1.0, player.supp + 0.8 * (1.0 - dp / 14.0))
-			var cd := player.camera.global_position.distance_to(p)
-			if cd < 30.0:
-				player.trauma = minf(1.0, player.trauma + 0.6 * (1.0 - cd / 30.0))
-			hear_gunshot(p, 60.0)
+			blast(p, 7.5, 190.0, 150.0, g.owner_is_player)
 		"flash":
 			Sfx.play_at("bang", p, 4.0, false)
 			fx.flash_light(p, Color.WHITE, 30.0, 0.3, 28.0)
@@ -999,7 +1004,8 @@ func _on_detonate(g: Gadget) -> void:
 ## The one thing interact does right now. Everything hangs off one key, so the prompt, the press
 ## and the hold all read this instead of checking the targets separately and disagreeing.
 ## Takedown first; then whichever aimed thing (pickup, device, badge clone) you look at most squarely;
-## then the proximity-only things (splice, ladder, drag body). Looking at something is how you choose.
+## then the proximity-only things (splice, drag body). Looking at something is how you choose.
+## Ladders aren't here: you climb one by walking into it.
 func focus() -> Dictionary:
 	if not player.alive or tablet_access:
 		return {}
@@ -1032,9 +1038,6 @@ func focus() -> Dictionary:
 	# then the things that only need you to stand in the right place
 	if tool.get("kind") == "splice":
 		return tool
-	var l := ladder_near()
-	if l:
-		return {"kind": "ladder", "ladder": l, "label": "Climb ladder"}
 	var c := corpse_near()
 	if c:
 		return {"kind": "drag", "soldier": c, "label": "Hold to drag body"}
@@ -1067,17 +1070,23 @@ func find_use_target() -> Device:
 	return best
 
 
-## A ladder you can get on from where you stand: at its foot, or at the top edge.
-func ladder_near() -> Ladder:
-	if not player.alive or player.ladder or player.drag_body:
+## A ladder that takes you as you walk into it: up against its rungs anywhere along its height, or
+## at the top edge stepping back onto it. `push` is the direction you're moving.
+func ladder_touch(push: Vector3) -> Ladder:
+	if not player.alive or player.ladder or player.drag_body or push.length() < 0.2:
 		return null
 	var p := player.global_position
+	var flat := Vector3(push.x, 0.0, push.z).normalized()
 	for l in facility.ladders:
-		var foot := l.climb_point(l.global_position.y)
-		if absf(p.y - l.global_position.y) < 0.6 and Vector2(p.x - foot.x, p.z - foot.z).length() < 0.9:
-			return l
+		var on := l.climb_point(p.y)
+		if p.y > l.global_position.y - 0.3 and p.y < l.top_y() - 0.3 and Vector2(p.x - on.x, p.z - on.z).length() < 0.75:
+			if flat.dot(-l.normal) > 0.5:
+				return l
 		if absf(p.y - l.top_y()) < 0.6 and Vector2(p.x - l.top_exit.x, p.z - l.top_exit.z).length() < 1.0:
-			return l
+			var back := l.climb_point(l.top_y()) - l.top_exit
+			back.y = 0.0
+			if flat.dot(back.normalized()) > 0.6:
+				return l
 	return null
 
 
@@ -1164,6 +1173,19 @@ func drone_report(_dr: Drone) -> void:
 	for sq: Squad in squads.values():
 		if sq.alive_members().any(func(m: Soldier) -> bool: return m.state == Soldier.State.COMBAT):
 			sq.report(player.global_position, time)
+
+
+## A hit drone turns on you: it dives and blows itself up on contact.
+func drone_dive(dr: Drone) -> void:
+	hud.hint_event("drone_dive")
+	Sfx.play_at("drone_lock", dr.global_position, 2.0, false, 0.0)
+
+
+## A diving drone went off: a small charge, nasty up close.
+func drone_exploded(dr: Drone, at: Vector3, was_watching: bool) -> void:
+	blast(at, 5.0, 120.0, 85.0, false)
+	fx.hole(at, Vector3.UP, 4.0, true)
+	drone_destroyed(dr, was_watching)
 
 
 func drone_destroyed(dr: Drone, was_watching: bool) -> void:
@@ -1645,8 +1667,6 @@ func interact() -> void:
 		"pickup":
 			_pick_up(a.pickup)
 			_use_latch = true
-		"ladder":
-			player.grab_ladder(a.ladder)
 		"drag":
 			player.start_drag(a.soldier)
 

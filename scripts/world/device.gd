@@ -635,7 +635,7 @@ func tick(dt: float, game: Game) -> void:
 		sees_player = looped <= 0.0 and (_can_see(game, p.eye_pos()) or _can_see(game, p.chest_pos()))
 	if sees_player and p.alive:
 		var d := head.global_position.distance_to(p.global_position)
-		var stance := 0.5 if p.crouched else 1.0
+		var stance := 0.25 if p.prone else (0.5 if p.crouched else 1.0)
 		var motion := 0.5 if p.speed_2d() < 0.5 else 1.0
 		aware = minf(1.2, aware + 1.6 / (1.0 + d / 10.0) * stance * motion * game.player_light * dt)
 		_lost_t = 0.0

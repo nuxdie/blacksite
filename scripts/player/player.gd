@@ -14,6 +14,9 @@ const EYE_CROUCH := 0.98
 const EYE_PEEK := 1.45
 const H_STAND := 1.8
 const H_CROUCH := 1.15
+const H_PRONE := 0.62
+const EYE_PRONE := 0.36
+const PRONE_SPEED := 0.9
 const LEAN := 0.42
 const FOV := 74.0
 const BREATH := 4.0
@@ -38,6 +41,10 @@ var pitch := 0.0
 var crouch_toggle := false
 var crouched := false
 var crouch_k := 0.0
+## Flat on the ground: slowest, quietest, lowest. Set by the capsule height, like crouched.
+var prone := false
+var prone_toggle := false
+var prone_k := 0.0
 var eye_h := EYE_STAND
 var peek := 0.0
 var lean_k := 0.0
@@ -78,6 +85,10 @@ var vault_t := -1.0
 var vault_from := Vector3.ZERO
 var vault_to := Vector3.ZERO
 var vault_ok := false
+## How long the vault or climb takes: short over a crate, longer hauling up a wall.
+var vault_dur := 0.38
+## After letting go of a ladder, a moment before it can grab you again.
+var ladder_cool := 0.0
 var trauma := 0.0
 var kick := 0.0
 var heart_t := 0.0
@@ -110,6 +121,7 @@ func spawn(pos: Vector3, facing := PI) -> void:
 	hp = MAX_HP
 	alive = true
 	crouch_toggle = false
+	prone_toggle = false
 	_set_height(H_STAND)
 	supp = 0.0
 	last_hit = 99.0
@@ -157,7 +169,12 @@ func eye_pos() -> Vector3:
 
 
 func chest_pos() -> Vector3:
-	return global_position + Vector3.UP * lerpf(1.25, 0.68, crouch_k) + right() * lean_reach * 0.35
+	return global_position + Vector3.UP * _stance_h(1.25, 0.68, 0.3) + right() * lean_reach * 0.35
+
+
+## A height for the current stance, blending stand, crouch and prone values.
+func _stance_h(stand: float, crouch: float, flat: float) -> float:
+	return lerpf(lerpf(stand, crouch, crouch_k), flat, prone_k)
 
 
 func is_scoped() -> bool:
@@ -181,15 +198,17 @@ func _set_height(h: float) -> void:
 	_shape.height = h
 	col.position.y = h * 0.5
 	crouched = h < H_STAND
+	prone = h < H_CROUCH
 
 
-func _can_stand() -> bool:
+## Would a capsule of this height fit here (or at `at`) without hitting the world?
+func _can_fit(h: float, at := global_position) -> bool:
 	var q := PhysicsShapeQueryParameters3D.new()
 	var s := CapsuleShape3D.new()
 	s.radius = _shape.radius - 0.02
-	s.height = H_STAND - 0.05
+	s.height = h - 0.05
 	q.shape = s
-	q.transform = Transform3D(Basis.IDENTITY, global_position + Vector3.UP * (H_STAND * 0.5 + 0.03))
+	q.transform = Transform3D(Basis.IDENTITY, at + Vector3.UP * (h * 0.5 + 0.03))
 	q.collision_mask = Layers.WORLD
 	return get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty()
 
@@ -204,9 +223,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		mouse_delta += event.relative
 	if event.is_action_pressed("crouch"):
-		crouch_toggle = not crouch_toggle
+		# from prone, crouch comes up to a crouch; otherwise it toggles
+		crouch_toggle = true if prone_toggle else not crouch_toggle
+		prone_toggle = false
 		Sfx.play("cloth")
 		game.hud.learn("crouch")
+	elif event.is_action_pressed("prone"):
+		prone_toggle = not prone_toggle
+		if prone_toggle:
+			crouch_toggle = false
+			ladder = null
+		Sfx.play("cloth")
+		game.hud.learn("prone")
 	elif event.is_action_pressed("reload"):
 		weapons.start_reload()
 	elif event.is_action_pressed("fire_mode"):
@@ -225,15 +253,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		weapons.cycle_gadget()
 	elif event.is_action_pressed("interact"):
 		if ladder:
-			ladder = null
+			_leave_ladder()
 		else:
 			game.interact()
 	elif event.is_action_pressed("bandage"):
 		start_bandage()
 	elif event.is_action_pressed("jump"):
 		if ladder:
-			velocity = ladder.normal * 2.5
-			ladder = null
+			_leave_ladder()
+			velocity = ladder_push
 		elif vault_ok:
 			_start_vault()
 		elif is_on_floor() and not crouched:
@@ -265,14 +293,21 @@ func tick(dt: float) -> void:
 
 	# stance
 	var sprint_key := Input.is_action_pressed("sprint")
-	if sprint_key and f > 0.0 and crouch_toggle and ads < 0.3 and drag_body == null:
+	if sprint_key and f > 0.0 and (crouch_toggle or prone_toggle) and ads < 0.3 and drag_body == null:
 		crouch_toggle = false
+		prone_toggle = false
 	var want_crouch := crouch_toggle or Input.is_action_pressed("crouch_hold")
-	if want_crouch and not crouched:
-		_set_height(H_CROUCH)
-	elif not want_crouch and crouched and _can_stand():
-		_set_height(H_STAND)
+	var want_h := H_PRONE if prone_toggle else (H_CROUCH if want_crouch else H_STAND)
+	if want_h < _shape.height:
+		_set_height(want_h)
+	elif want_h > _shape.height:
+		# coming up: as far as the ceiling allows
+		if _can_fit(want_h):
+			_set_height(want_h)
+		elif prone and want_h > H_CROUCH and _can_fit(H_CROUCH):
+			_set_height(H_CROUCH)
 	crouch_k = lerpf(crouch_k, 1.0 if crouched else 0.0, minf(1.0, dt * 10.0))
+	prone_k = lerpf(prone_k, 1.0 if prone else 0.0, minf(1.0, dt * 6.0))
 	sprinting = sprint_key and f > 0.0 and not crouched and ads < 0.3 and weapons.reload_t <= 0.0 and is_on_floor() and drag_body == null and not leg_wound and bandage_t < 0.0
 	if sprinting:
 		game.hud.learn("sprint")
@@ -286,11 +321,11 @@ func tick(dt: float) -> void:
 	if _probe_t <= 0.0:
 		_probe_t = 0.12
 		_probe_surroundings()
-	var peek_want := 1.0 if crouched and ads > 0.3 and low_cover_ahead else 0.0
+	var peek_want := 1.0 if crouched and not prone and ads > 0.3 and low_cover_ahead else 0.0
 	peek = lerpf(peek, peek_want, minf(1.0, dt * 8.0))
 	if peek > 0.5:
 		game.hud.learn("peek")
-	eye_h = lerpf(lerpf(EYE_STAND, EYE_CROUCH, crouch_k), EYE_PEEK, peek)
+	eye_h = lerpf(_stance_h(EYE_STAND, EYE_CROUCH, EYE_PRONE), EYE_PEEK, peek)
 
 	_update_sway(dt, w)
 
@@ -307,6 +342,14 @@ func tick(dt: float) -> void:
 			reach = signf(reach) * maxf(0.0, base.distance_to(hit.position) - 0.15)
 	lean_reach = reach
 
+	ladder_cool = maxf(0.0, ladder_cool - dt)
+	if ladder == null and vault_t < 0.0 and drag_body == null and not prone and ladder_cool <= 0.0:
+		var l := game.ladder_touch(wish)
+		if l:
+			grab_ladder(l)
+	# a ledge in reach while airborne: keep jump held to haul yourself up
+	if vault_ok and vault_t < 0.0 and not is_on_floor() and Input.is_action_pressed("jump"):
+		_start_vault()
 	if ladder:
 		_climb(dt, f)
 	elif vault_t >= 0.0:
@@ -321,7 +364,7 @@ func tick(dt: float) -> void:
 		var prev := step_phase
 		step_phase += hs * dt * 0.62
 		if floori(prev) != floori(step_phase):
-			Sfx.play("step", -6.0 if sprinting else (-24.0 if crouched else -13.0))
+			Sfx.play("step", -6.0 if sprinting else (-30.0 if prone else (-24.0 if crouched else -13.0)))
 	bob = lerpf(bob, minf(1.0, hs / WALK) if is_on_floor() else 0.0, minf(1.0, dt * 8.0))
 	roll = lerpf(roll, -s * 0.012 - lean_k * 0.16, minf(1.0, dt * 9.0))
 
@@ -347,7 +390,9 @@ func tick(dt: float) -> void:
 
 func _move(dt: float, wish: Vector3, w: WeaponData) -> void:
 	var speed := WALK
-	if crouched:
+	if prone:
+		speed = PRONE_SPEED
+	elif crouched:
 		speed = CROUCH_SPEED
 	elif sprinting:
 		speed = SPRINT
@@ -385,7 +430,7 @@ func _update_sway(dt: float, w: WeaponData) -> void:
 	sway_t += dt
 	var moving := speed_2d() > 0.5
 	var amp := 0.0065 if is_scoped() else ads * 0.0012
-	amp *= (1.0 + supp * 2.0) * (0.65 if crouched else 1.0) * (2.0 if moving else 1.0)
+	amp *= (1.0 + supp * 2.0) * (0.4 if prone else (0.65 if crouched else 1.0)) * (2.0 if moving else 1.0)
 	var want_hold := is_scoped() and Input.is_action_pressed("sprint") and breath_out <= 0.0 and breath > 0.0
 	if want_hold and not holding_breath:
 		Sfx.play("breath_in", -6.0)
@@ -413,22 +458,23 @@ func _probe_surroundings() -> void:
 	vault_ok = false
 	low_cover_ahead = false
 	var hit := _ray(feet + Vector3.UP * 0.55, feet + Vector3.UP * 0.55 + fwd * 1.0)
-	if not hit.is_empty() and is_on_floor() and drag_body == null:
+	if hit.is_empty():
+		# nothing at knee height: a taller wall or a ledge to climb?
+		hit = _ray(feet + Vector3.UP * 1.3, feet + Vector3.UP * 1.3 + fwd * 1.0)
+	var airborne := not is_on_floor()
+	if not hit.is_empty() and drag_body == null and not prone and (not airborne or velocity.y < 2.0):
 		var top_probe: Vector3 = hit.position + fwd * 0.3
-		top_probe.y = feet.y + 1.8
+		top_probe.y = feet.y + 2.5
 		var down := _ray(top_probe, Vector3(top_probe.x, feet.y + 0.3, top_probe.z))
 		if not down.is_empty():
 			var rise: float = down.position.y - feet.y
-			if rise > 0.45 and rise < 1.6:
-				var q := PhysicsShapeQueryParameters3D.new()
-				var sp := SphereShape3D.new()
-				sp.radius = 0.3
-				q.shape = sp
-				q.transform = Transform3D(Basis.IDENTITY, Vector3(top_probe.x, down.position.y + 0.65, top_probe.z))
-				q.collision_mask = Layers.WORLD
-				if get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty():
+			# from the ground: a crate to vault or a wall to climb; mid-jump: a ledge within arm's reach
+			if rise > 0.45 and rise < (1.5 if airborne else 2.3):
+				var top := Vector3(top_probe.x, down.position.y + 0.02, top_probe.z)
+				if _can_fit(H_CROUCH, top):
 					vault_ok = true
-					vault_to = Vector3(top_probe.x, down.position.y + 0.02, top_probe.z)
+					vault_to = top
+					vault_dur = 0.38 if rise < 1.5 else 0.9
 	if crouched:
 		var d := view_dir()
 		d.y = 0.0
@@ -445,6 +491,7 @@ func grab_ladder(l: Ladder) -> void:
 	velocity = Vector3.ZERO
 	drag_body = null
 	crouch_toggle = false
+	prone_toggle = false
 	weapons.reload_t = 0.0
 	weapons.tube_loading = false
 	var y := global_position.y
@@ -455,20 +502,33 @@ func grab_ladder(l: Ladder) -> void:
 	game.hud.learn("ladder")
 
 
-## Forward climbs, back descends; off the top you step onto the platform, off the bottom you let go.
+## Which way you push the ladder's rungs is read off the key, so the ladder can push you back.
+var ladder_push := Vector3.ZERO
+
+
+func _leave_ladder() -> void:
+	if ladder:
+		ladder_push = ladder.normal * 2.5
+	ladder = null
+	ladder_cool = 0.6
+
+
+## Forward goes where you look: up when you look up or ahead, down when you look at the ground.
+## Off the top you step onto the platform, off the bottom you let go.
 func _climb(dt: float, f: float) -> void:
 	velocity = Vector3.ZERO
 	var l := ladder
-	var y := global_position.y + f * Ladder.CLIMB_SPEED * dt
-	if y >= l.top_y() - 0.05 and f > 0.0:
+	var dir := f * (-1.0 if view_dir().y < -0.45 else 1.0)
+	var y := global_position.y + dir * Ladder.CLIMB_SPEED * dt
+	if y >= l.top_y() - 0.05 and dir > 0.0:
 		global_position = l.top_exit
-		ladder = null
+		_leave_ladder()
 		Sfx.play("step", -10.0)
 		return
-	if y <= l.global_position.y and f < 0.0:
+	if y <= l.global_position.y and dir < 0.0:
 		global_position = l.bottom_exit()
 		global_position.y = l.global_position.y
-		ladder = null
+		_leave_ladder()
 		return
 	global_position = l.climb_point(y)
 	if absf(f) > 0.1:
@@ -502,7 +562,7 @@ func _start_vault() -> void:
 
 
 func _update_vault(dt: float) -> void:
-	vault_t += dt / 0.38
+	vault_t += dt / vault_dur
 	var t := minf(vault_t, 1.0)
 	var up := sin(minf(t * 1.6, 1.0) * PI * 0.5)
 	var fwd := smoothstep(0.25, 1.0, t)
@@ -525,7 +585,7 @@ func fire_weapon(w: WeaponData) -> void:
 		cone += 0.06
 	if w.scoped and not is_scoped():
 		cone += 0.02
-	cone *= 0.75 if crouched else 1.0
+	cone *= 0.6 if prone else (0.75 if crouched else 1.0)
 	cone += supp * 0.012
 	bloom = minf(0.03, bloom + 0.004)
 	var o := eye_pos()
@@ -535,7 +595,7 @@ func fire_weapon(w: WeaponData) -> void:
 			game.player_shot(o, Ballistics.spread(center, lerpf(w.hip_spread, w.ads_spread, ads)), w, i == 0)
 	else:
 		game.player_shot(o, Ballistics.spread(aim_dir(), cone), w)
-	var k := w.kick * lerpf(1.0, 0.65, ads) * (0.85 if crouched else 1.0)
+	var k := w.kick * lerpf(1.0, 0.65, ads) * (0.7 if prone else (0.85 if crouched else 1.0))
 	pitch += k
 	recov += k
 	yaw += randf_range(-1.0, 1.0) * w.kick_yaw
@@ -680,8 +740,8 @@ func ray_hit(o: Vector3, d: Vector3) -> Dictionary:
 	var zones := [
 		["head", head_p, 0.15],
 		["body", chest_pos(), lerpf(0.27, 0.3, crouch_k)],
-		["body", global_position + Vector3.UP * lerpf(0.95, 0.45, crouch_k), 0.24],
-		["legs", global_position + Vector3.UP * lerpf(0.5, 0.25, crouch_k), 0.2],
+		["body", global_position + Vector3.UP * _stance_h(0.95, 0.45, 0.25) - forward() * prone_k * 0.5, 0.24],
+		["legs", global_position + Vector3.UP * _stance_h(0.5, 0.25, 0.2) - forward() * prone_k * 1.0, 0.2],
 	]
 	var best := {}
 	for z: Array in zones:

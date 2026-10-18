@@ -5,9 +5,10 @@ extends Node3D
 ## security network, so comms-down grounds it (returns to base) and an EMP drops it for a while.
 ## It is shootable; a destroyed drone that was watching you is itself a report.
 
-enum Mode { PATROL, INVESTIGATE, TRACK, RETURN, DOWN }
+enum Mode { PATROL, INVESTIGATE, TRACK, RETURN, DOWN, DIVE }
 
 const SPEED := 5.5
+const DIVE_SPEED := 13.0
 const SCAN_RANGE := 22.0
 const SCAN_HALF := 26.0
 const EYE_DROP := 0.0
@@ -23,6 +24,10 @@ var sees_player := false
 var destroyed := false
 var down_t := 0.0
 var hp := 18.0
+## A wreck that has hit the ground, and the fall before it.
+var landed := false
+var _vy := 0.0
+var _dive_t := 0.0
 
 var _i := 0
 var _wait := 0.0
@@ -138,7 +143,13 @@ func reset() -> void:
 	position = home
 	visible = true
 	_body.visible = true
+	_body.rotation = Vector3.ZERO
 	_cone.visible = true
+	landed = false
+	_vy = 0.0
+	_dive_t = 0.0
+	if _hum and _hum.stream and not _hum.playing:
+		_hum.play()
 
 
 func head_pos() -> Vector3:
@@ -164,10 +175,70 @@ func take_hit(amount: float) -> void:
 		destroyed = true
 		aware = 0.0
 		_cone.visible = false
+		_vy = 0.0
+		if _hum:
+			_hum.stop()
 		game.fx.burst("spark", head_pos())
 		game.fx.flash_light(global_position, Color("ffd080"), 4.0, 0.2, 10.0)
 		Sfx.play_at("impact_metal", global_position, 2.0)
 		game.drone_destroyed(self, was_watching)
+	elif not grounded() and mode != Mode.DIVE:
+		# hit but flying: it stops scanning and comes for you
+		_start_dive()
+
+
+func _start_dive() -> void:
+	mode = Mode.DIVE
+	_dive_t = 0.0
+	aware = 1.3
+	sees_player = true
+	_lost = 0.0
+	game.drone_dive(self)
+
+
+## Dive at the player's chest and go off on contact, or on whatever it hits on the way.
+func _dive(dt: float) -> void:
+	_dive_t += dt
+	var p := game.player
+	var goal := p.chest_pos()
+	if p.alive and (game.los(head_pos(), goal) or _dive_t < 1.0):
+		_target = goal
+		_lost = 0.0
+	else:
+		_lost += dt
+	if _lost > 4.0 or not p.alive:
+		# lost you for good: back to hunting from above
+		mode = Mode.TRACK
+		_target = Vector3(p.global_position.x, home.y, p.global_position.z)
+		return
+	var to := _target - global_position
+	var d := to.length()
+	var step := to / maxf(d, 0.001) * minf(d, DIVE_SPEED * dt)
+	var next := global_position + step
+	# the world in the way, or close enough: boom
+	var q := PhysicsRayQueryParameters3D.create(global_position, next + step.normalized() * 0.25, Layers.WORLD)
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty():
+		_explode(hit.position)
+		return
+	global_position = next
+	_yaw = atan2(-to.x, -to.z)
+	if d < 1.1 or (p.alive and global_position.distance_to(p.chest_pos()) < 1.1):
+		_explode(global_position)
+
+
+func _explode(at: Vector3) -> void:
+	var was_watching := sees_player
+	destroyed = true
+	landed = true
+	aware = 0.0
+	sees_player = false
+	_cone.visible = false
+	_body.visible = false
+	if _hum:
+		_hum.stop()
+	global_position = at
+	game.drone_exploded(self, at, was_watching)
 
 
 ## Knocked out by an EMP for a while, then it reboots.
@@ -198,8 +269,13 @@ func tick(dt: float, game_ref: Game) -> void:
 			mode = Mode.RETURN
 			position.y = home.y
 		return
-	if game.comms_down and mode != Mode.RETURN:
+	if game.comms_down and mode != Mode.RETURN and mode != Mode.DIVE:
 		mode = Mode.RETURN
+	if mode == Mode.DIVE:
+		_dive(dt)
+		if not destroyed:
+			_apply_visual(dt)
+		return
 	_scan(dt)
 	match mode:
 		Mode.PATROL: _patrol(dt)
@@ -211,18 +287,22 @@ func tick(dt: float, game_ref: Game) -> void:
 
 func _apply_visual(dt: float) -> void:
 	var tilt := clampf((_target - global_position).length(), 0.0, 3.0) / 3.0 * 0.2
+	if mode == Mode.DIVE:
+		tilt = 0.9
 	_body.rotation.y = _yaw
 	_body.rotation.x = lerp_angle(_body.rotation.x, tilt, minf(1.0, dt * 4.0))
 	_body.position.y = sin(_bob * 2.3) * 0.04
 	var c := Color("40ff90")
-	if mode == Mode.TRACK or (aware > 0.95):
+	if mode == Mode.DIVE:
+		c = Color("ff3020") if fmod(_bob, 0.16) < 0.08 else Color("400806")
+	elif mode == Mode.TRACK or (aware > 0.95):
 		c = Color("ff3020") if fmod(_bob, 0.4) < 0.25 else Color("400806")
 	elif aware > 0.1 or mode == Mode.INVESTIGATE:
 		c = Color("ffb84a")
 	_led.emission = c
 	_cone.light_color = c.lerp(Color.WHITE, 0.5)
 	if _hum:
-		_hum.pitch_scale = 1.0 + tilt * 0.3
+		_hum.pitch_scale = 1.0 + tilt * 0.3 + (0.5 if mode == Mode.DIVE else 0.0)
 
 
 func _scan(dt: float) -> void:
@@ -327,10 +407,23 @@ func _fall(dt: float, hover := false) -> void:
 		position.y = move_toward(position.y, home.y - 0.3, dt * 1.5)
 		_body.rotation.z = sin(_bob * 8.0) * 0.1
 		return
-	# destroyed: drop and tip over
-	position.y = maxf(0.4, position.y - dt * (position.y - home.y + 3.0) * 1.2)
-	_body.rotation.z += dt * 2.0
-	_body.rotation.x += dt * 1.3
-	_yaw += dt * 3.0
-	if _hum:
-		_hum.stop()
+	# destroyed: a wreck falls until it hits whatever is below, then lies there
+	if landed:
+		return
+	_vy -= 9.8 * dt
+	var ny := position.y + _vy * dt
+	var q := PhysicsRayQueryParameters3D.create(global_position, Vector3(global_position.x, ny - 0.15, global_position.z), Layers.WORLD)
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty():
+		position.y = hit.position.y + 0.12
+		landed = true
+		_body.rotation.x = 0.0
+		_body.rotation.z = 0.9
+		game.fx.burst("spark", global_position)
+		Sfx.play_at("impact_metal", global_position, 0.0)
+		Sfx.play_at("glass", global_position, -8.0)
+		return
+	position.y = ny
+	_body.rotation.z += dt * 4.0
+	_body.rotation.x += dt * 2.5
+	_yaw += dt * 5.0

@@ -24,7 +24,7 @@ var persist := true
 const BINDINGS := {
 	"move_forward": [["key", KEY_W]], "move_back": [["key", KEY_S]],
 	"move_left": [["key", KEY_A]], "move_right": [["key", KEY_D]],
-	"sprint": [["key", KEY_SHIFT]], "crouch": [["key", KEY_C]], "crouch_hold": [["key", KEY_CTRL]],
+	"sprint": [["key", KEY_SHIFT]], "crouch": [["key", KEY_C]], "crouch_hold": [["key", KEY_CTRL]], "prone": [["key", KEY_Z]],
 	"jump": [["key", KEY_SPACE]], "lean_left": [["key", KEY_Q]], "lean_right": [["key", KEY_E]],
 	"fire": [["mouse", MOUSE_BUTTON_LEFT]], "aim": [["mouse", MOUSE_BUTTON_RIGHT]],
 	"reload": [["key", KEY_R]], "fire_mode": [["key", KEY_B]],
